@@ -18,6 +18,7 @@
 
 #include <linux/blkdev.h>
 #include <linux/ratelimit.h>
+#include <linux/rcustring.h>
 #include "ctree.h"
 #include "volumes.h"
 #include "disk-io.h"
@@ -27,7 +28,6 @@
 #include "extent_io.h"
 #include "dev-replace.h"
 #include "check-integrity.h"
-#include "rcu-string.h"
 #include "raid56.h"
 
 /*
@@ -586,7 +586,8 @@ static int scrub_print_warning_inode(u64 inum, u64 offset, u64 root,
 		printk_in_rcu(KERN_WARNING "BTRFS: %s at logical %llu on dev "
 			"%s, sector %llu, root %llu, inode %llu, offset %llu, "
 			"length %llu, links %u (path: %s)\n", swarn->errstr,
-			swarn->logical, rcu_str_deref(swarn->dev->name),
+			swarn->logical,
+			rcu_string_dereference(swarn->dev->name),
 			(unsigned long long)swarn->sector, root, inum, offset,
 			min(isize - offset, (u64)PAGE_SIZE), nlink,
 			(char *)(unsigned long)ipath->fspath->val[i]);
@@ -598,7 +599,7 @@ err:
 	printk_in_rcu(KERN_WARNING "BTRFS: %s at logical %llu on dev "
 		"%s, sector %llu, root %llu, inode %llu, offset %llu: path "
 		"resolving failed with ret=%d\n", swarn->errstr,
-		swarn->logical, rcu_str_deref(swarn->dev->name),
+		swarn->logical, rcu_string_dereference(swarn->dev->name),
 		(unsigned long long)swarn->sector, root, inum, offset, ret);
 
 	free_ipath(ipath);
@@ -656,7 +657,7 @@ static void scrub_print_warning(const char *errstr, struct scrub_block *sblock)
 				"BTRFS: %s at logical %llu on dev %s, "
 				"sector %llu: metadata %s (level %d) in tree "
 				"%llu\n", errstr, swarn.logical,
-				rcu_str_deref(dev->name),
+				rcu_string_dereference(dev->name),
 				(unsigned long long)swarn.sector,
 				ref_level ? "node" : "leaf",
 				ret < 0 ? -1 : ref_level,
@@ -855,7 +856,7 @@ out:
 			num_uncorrectable_read_errors);
 		printk_ratelimited_in_rcu(KERN_ERR "BTRFS: "
 		    "unable to fixup (nodatasum) error at logical %llu on dev %s\n",
-			fixup->logical, rcu_str_deref(fixup->dev->name));
+		    fixup->logical, rcu_string_dereference(fixup->dev->name));
 	}
 
 	btrfs_free_path(path);
@@ -1236,7 +1237,7 @@ corrected_error:
 			spin_unlock(&sctx->stat_lock);
 			printk_ratelimited_in_rcu(KERN_ERR
 				"BTRFS: fixed up error at logical %llu on dev %s\n",
-				logical, rcu_str_deref(dev->name));
+				logical, rcu_string_dereference(dev->name));
 		}
 	} else {
 did_not_correct_error:
@@ -1245,7 +1246,7 @@ did_not_correct_error:
 		spin_unlock(&sctx->stat_lock);
 		printk_ratelimited_in_rcu(KERN_ERR
 			"BTRFS: unable to fixup (regular) error at logical %llu on dev %s\n",
-			logical, rcu_str_deref(dev->name));
+			logical, rcu_string_dereference(dev->name));
 	}
 
 out:

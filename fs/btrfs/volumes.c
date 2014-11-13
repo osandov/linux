@@ -27,6 +27,7 @@
 #include <linux/kthread.h>
 #include <linux/raid/pq.h>
 #include <linux/semaphore.h>
+#include <linux/rcustring.h>
 #include <asm/div64.h>
 #include "ctree.h"
 #include "extent_map.h"
@@ -37,7 +38,6 @@
 #include "raid56.h"
 #include "async-thread.h"
 #include "check-integrity.h"
-#include "rcu-string.h"
 #include "math.h"
 #include "dev-replace.h"
 #include "sysfs.h"
@@ -6523,7 +6523,7 @@ static int update_dev_stat_item(struct btrfs_trans_handle *trans,
 	if (ret < 0) {
 		printk_in_rcu(KERN_WARNING "BTRFS: "
 			"error %d while searching for dev_stats item for device %s!\n",
-			      ret, rcu_str_deref(device->name));
+			      ret, rcu_string_dereference(device->name));
 		goto out;
 	}
 
@@ -6534,7 +6534,7 @@ static int update_dev_stat_item(struct btrfs_trans_handle *trans,
 		if (ret != 0) {
 			printk_in_rcu(KERN_WARNING "BTRFS: "
 				"delete too small dev_stats item for device %s failed %d!\n",
-				      rcu_str_deref(device->name), ret);
+				rcu_string_dereference(device->name), ret);
 			goto out;
 		}
 		ret = 1;
@@ -6547,8 +6547,8 @@ static int update_dev_stat_item(struct btrfs_trans_handle *trans,
 					      &key, sizeof(*ptr));
 		if (ret < 0) {
 			printk_in_rcu(KERN_WARNING "BTRFS: "
-					  "insert dev_stats item for device %s failed %d!\n",
-				      rcu_str_deref(device->name), ret);
+				      "insert dev_stats item for device %s failed %d!\n",
+				      rcu_string_dereference(device->name), ret);
 			goto out;
 		}
 	}
@@ -6604,7 +6604,7 @@ static void btrfs_dev_stat_print_on_error(struct btrfs_device *dev)
 		return;
 	printk_ratelimited_in_rcu(KERN_ERR "BTRFS: "
 			   "bdev %s errs: wr %u, rd %u, flush %u, corrupt %u, gen %u\n",
-			   rcu_str_deref(dev->name),
+			   rcu_string_dereference(dev->name),
 			   btrfs_dev_stat_read(dev, BTRFS_DEV_STAT_WRITE_ERRS),
 			   btrfs_dev_stat_read(dev, BTRFS_DEV_STAT_READ_ERRS),
 			   btrfs_dev_stat_read(dev, BTRFS_DEV_STAT_FLUSH_ERRS),
@@ -6624,7 +6624,7 @@ static void btrfs_dev_stat_print_on_load(struct btrfs_device *dev)
 
 	printk_in_rcu(KERN_INFO "BTRFS: "
 		   "bdev %s errs: wr %u, rd %u, flush %u, corrupt %u, gen %u\n",
-	       rcu_str_deref(dev->name),
+	       rcu_string_dereference(dev->name),
 	       btrfs_dev_stat_read(dev, BTRFS_DEV_STAT_WRITE_ERRS),
 	       btrfs_dev_stat_read(dev, BTRFS_DEV_STAT_READ_ERRS),
 	       btrfs_dev_stat_read(dev, BTRFS_DEV_STAT_FLUSH_ERRS),

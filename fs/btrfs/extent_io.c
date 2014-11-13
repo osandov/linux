@@ -11,6 +11,7 @@
 #include <linux/pagevec.h>
 #include <linux/prefetch.h>
 #include <linux/cleancache.h>
+#include <linux/rcustring.h>
 #include "extent_io.h"
 #include "extent_map.h"
 #include "ctree.h"
@@ -18,7 +19,6 @@
 #include "volumes.h"
 #include "check-integrity.h"
 #include "locking.h"
-#include "rcu-string.h"
 #include "backref.h"
 
 static struct kmem_cache *extent_state_cache;
@@ -2076,7 +2076,7 @@ int repair_io_failure(struct inode *inode, u64 start, u64 length, u64 logical,
 	printk_ratelimited_in_rcu(KERN_INFO
 				  "BTRFS: read error corrected: ino %llu off %llu (dev %s sector %llu)\n",
 				  btrfs_ino(inode), start,
-				  rcu_str_deref(dev->name), sector);
+				  rcu_string_dereference(dev->name), sector);
 	bio_put(bio);
 	return 0;
 }

@@ -32,6 +32,7 @@
 #include <linux/list_sort.h>
 #include <linux/raid/xor.h>
 #include <linux/vmalloc.h>
+#include <linux/rcustring.h>
 #include <asm/div64.h>
 #include "ctree.h"
 #include "extent_map.h"
@@ -42,7 +43,6 @@
 #include "raid56.h"
 #include "async-thread.h"
 #include "check-integrity.h"
-#include "rcu-string.h"
 
 /* set when additional merges to this rbio are not allowed */
 #define RBIO_RMW_LOCKED_BIT	1

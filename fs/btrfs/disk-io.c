@@ -31,6 +31,7 @@
 #include <linux/ratelimit.h>
 #include <linux/uuid.h>
 #include <linux/semaphore.h>
+#include <linux/rcustring.h>
 #include <asm/unaligned.h>
 #include "ctree.h"
 #include "disk-io.h"
@@ -44,7 +45,6 @@
 #include "free-space-cache.h"
 #include "inode-map.h"
 #include "check-integrity.h"
-#include "rcu-string.h"
 #include "dev-replace.h"
 #include "raid56.h"
 #include "sysfs.h"
@@ -3070,7 +3070,7 @@ static void btrfs_end_buffer_write_sync(struct buffer_head *bh, int uptodate)
 
 		printk_ratelimited_in_rcu(KERN_WARNING "BTRFS: lost page write due to "
 					  "I/O error on %s\n",
-					  rcu_str_deref(device->name));
+					  rcu_string_dereference(device->name));
 		/* note, we dont' set_buffer_write_io_error because we have
 		 * our own ways of dealing with the IO errors
 		 */
@@ -3259,7 +3259,7 @@ static int write_dev_flush(struct btrfs_device *device, int wait)
 
 		if (bio_flagged(bio, BIO_EOPNOTSUPP)) {
 			printk_in_rcu("BTRFS: disabling barriers on dev %s\n",
-				      rcu_str_deref(device->name));
+				      rcu_string_dereference(device->name));
 			device->nobarriers = 1;
 		} else if (!bio_flagged(bio, BIO_UPTODATE)) {
 			ret = -EIO;

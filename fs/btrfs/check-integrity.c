@@ -95,6 +95,7 @@
 #include <linux/genhd.h>
 #include <linux/blkdev.h>
 #include <linux/vmalloc.h>
+#include <linux/rcustring.h>
 #include "ctree.h"
 #include "disk-io.h"
 #include "hash.h"
@@ -104,7 +105,6 @@
 #include "print-tree.h"
 #include "locking.h"
 #include "check-integrity.h"
-#include "rcu-string.h"
 
 #define BTRFSIC_BLOCK_HASHTABLE_SIZE 0x10000
 #define BTRFSIC_BLOCK_LINK_HASHTABLE_SIZE 0x10000
@@ -848,8 +848,8 @@ static int btrfsic_process_superblock_dev_mirror(
 			printk_in_rcu(KERN_INFO "New initial S-block (bdev %p, %s)"
 				     " @%llu (%s/%llu/%d)\n",
 				     superblock_bdev,
-				     rcu_str_deref(device->name), dev_bytenr,
-				     dev_state->name, dev_bytenr,
+				     rcu_string_dereference(device->name),
+				     dev_bytenr, dev_state->name, dev_bytenr,
 				     superblock_mirror_num);
 		list_add(&superblock_tmp->all_blocks_node,
 			 &state->all_blocks_list);

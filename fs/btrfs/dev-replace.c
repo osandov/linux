@@ -25,6 +25,7 @@
 #include <linux/capability.h>
 #include <linux/kthread.h>
 #include <linux/math64.h>
+#include <linux/rcustring.h>
 #include <asm/div64.h>
 #include "ctree.h"
 #include "extent_map.h"
@@ -34,7 +35,6 @@
 #include "volumes.h"
 #include "async-thread.h"
 #include "check-integrity.h"
-#include "rcu-string.h"
 #include "dev-replace.h"
 #include "sysfs.h"
 
@@ -379,9 +379,9 @@ int btrfs_dev_replace_start(struct btrfs_root *root,
 	printk_in_rcu(KERN_INFO
 		      "BTRFS: dev_replace from %s (devid %llu) to %s started\n",
 		      src_device->missing ? "<missing disk>" :
-		        rcu_str_deref(src_device->name),
+		      rcu_string_dereference(src_device->name),
 		      src_device->devid,
-		      rcu_str_deref(tgt_device->name));
+		      rcu_string_dereference(tgt_device->name));
 
 	/*
 	 * from now on, the writes to the srcdev are all duplicated to
@@ -523,9 +523,10 @@ static int btrfs_dev_replace_finishing(struct btrfs_fs_info *fs_info,
 		printk_in_rcu(KERN_ERR
 			      "BTRFS: btrfs_scrub_dev(%s, %llu, %s) failed %d\n",
 			      src_device->missing ? "<missing disk>" :
-			        rcu_str_deref(src_device->name),
+			      rcu_string_dereference(src_device->name),
 			      src_device->devid,
-			      rcu_str_deref(tgt_device->name), scrub_ret);
+			      rcu_string_dereference(tgt_device->name),
+			      scrub_ret);
 		btrfs_dev_replace_unlock(dev_replace);
 		mutex_unlock(&root->fs_info->chunk_mutex);
 		mutex_unlock(&root->fs_info->fs_devices->device_list_mutex);
@@ -540,9 +541,9 @@ static int btrfs_dev_replace_finishing(struct btrfs_fs_info *fs_info,
 	printk_in_rcu(KERN_INFO
 		      "BTRFS: dev_replace from %s (devid %llu) to %s finished\n",
 		      src_device->missing ? "<missing disk>" :
-		        rcu_str_deref(src_device->name),
+		      rcu_string_dereference(src_device->name),
 		      src_device->devid,
-		      rcu_str_deref(tgt_device->name));
+		      rcu_string_dereference(tgt_device->name));
 	tgt_device->is_tgtdev_for_dev_replace = 0;
 	tgt_device->devid = src_device->devid;
 	src_device->devid = BTRFS_DEV_REPLACE_DEVID;
@@ -810,10 +811,10 @@ static int btrfs_dev_replace_kthread(void *data)
 		printk_in_rcu(KERN_INFO
 			"BTRFS: continuing dev_replace from %s (devid %llu) to %s @%u%%\n",
 			dev_replace->srcdev->missing ? "<missing disk>" :
-			rcu_str_deref(dev_replace->srcdev->name),
+			rcu_string_dereference(dev_replace->srcdev->name),
 			dev_replace->srcdev->devid,
 			dev_replace->tgtdev ?
-			rcu_str_deref(dev_replace->tgtdev->name) :
+			rcu_string_dereference(dev_replace->tgtdev->name) :
 			"<missing target disk>",
 			(unsigned int)progress);
 	}
