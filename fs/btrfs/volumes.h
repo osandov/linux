@@ -54,7 +54,7 @@ struct btrfs_device {
 
 	struct btrfs_root *dev_root;
 
-	struct rcu_string *name;
+	struct rcu_string __rcu *name;
 
 	u64 generation;
 
