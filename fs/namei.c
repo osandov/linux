@@ -4122,6 +4122,7 @@ SYSCALL_DEFINE2(symlink, const char __user *, oldname, const char __user *, newn
  * @dir:	new parent
  * @new_dentry:	where to create the new link
  * @delegated_inode: returns inode needing a delegation break
+ * @flags:      link flags
  *
  * The caller must hold dir->i_mutex
  *
@@ -4135,16 +4136,25 @@ SYSCALL_DEFINE2(symlink, const char __user *, oldname, const char __user *, newn
  * be appropriate for callers that expect the underlying filesystem not
  * to be NFS exported.
  */
-int vfs_link(struct dentry *old_dentry, struct inode *dir, struct dentry *new_dentry, struct inode **delegated_inode)
+int vfs_link(struct dentry *old_dentry, struct inode *dir,
+	     struct dentry *new_dentry, struct inode **delegated_inode,
+	     int flags)
 {
 	struct inode *inode = old_dentry->d_inode;
+	struct inode *target = new_dentry->d_inode;
 	unsigned max_links = dir->i_sb->s_max_links;
 	int error;
 
 	if (!inode)
 		return -ENOENT;
 
-	error = may_create(dir, new_dentry);
+	if (target) {
+		if (inode == target)
+			return 0;
+		error = may_delete(dir, new_dentry, false);
+	} else {
+		error = may_create(dir, new_dentry);
+	}
 	if (error)
 		return error;
 
@@ -4172,26 +4182,55 @@ int vfs_link(struct dentry *old_dentry, struct inode *dir, struct dentry *new_de
 	if (error)
 		return error;
 
-	inode_lock(inode);
-	/* Make sure we don't allow creating hardlink to an unlinked file */
-	if (inode->i_nlink == 0 && !(inode->i_state & I_LINKABLE))
-		error =  -ENOENT;
-	else if (max_links && inode->i_nlink >= max_links)
-		error = -EMLINK;
-	else {
-		error = try_break_deleg(inode, delegated_inode);
-		if (!error)
-			error = dir->i_op->link(old_dentry, dir, new_dentry, 0);
+	dget(new_dentry);
+	lock_two_nondirectories(inode, target);
+
+	if (is_local_mountpoint(new_dentry)) {
+		error = -EBUSY;
+		goto out;
 	}
 
-	if (!error && (inode->i_state & I_LINKABLE)) {
+	/* Make sure we don't allow creating hardlink to an unlinked file */
+	if (inode->i_nlink == 0 && !(inode->i_state & I_LINKABLE)) {
+		error =  -ENOENT;
+		goto out;
+	}
+	if (max_links && inode->i_nlink >= max_links) {
+		error = -EMLINK;
+		goto out;
+	}
+
+	error = try_break_deleg(inode, delegated_inode);
+	if (error)
+		goto out;
+	if (target) {
+		error = try_break_deleg(target, delegated_inode);
+		if (error)
+			goto out;
+	}
+
+	error = dir->i_op->link(old_dentry, dir, new_dentry, flags);
+	if (error)
+		goto out;
+
+	if (target) {
+		dont_mount(new_dentry);
+		detach_mounts(new_dentry);
+	}
+
+	if (inode->i_state & I_LINKABLE) {
 		spin_lock(&inode->i_lock);
 		inode->i_state &= ~I_LINKABLE;
 		spin_unlock(&inode->i_lock);
 	}
-	inode_unlock(inode);
-	if (!error)
+out:
+	unlock_two_nondirectories(inode, target);
+	dput(new_dentry);
+	if (!error) {
+		if (target)
+			fsnotify_link_count(target);
 		fsnotify_link(dir, inode, new_dentry);
+	}
 	return error;
 }
 EXPORT_SYMBOL(vfs_link);
@@ -4210,11 +4249,16 @@ int do_linkat(int olddfd, const char __user *oldname, int newdfd,
 {
 	struct dentry *new_dentry;
 	struct path old_path, new_path;
+	struct qstr new_last;
+	int new_type;
 	struct inode *delegated_inode = NULL;
-	int how = 0;
+	struct filename *to;
+	unsigned int how = 0, target_flags;
+	bool should_retry = false;
 	int error;
 
-	if ((flags & ~(AT_SYMLINK_FOLLOW | AT_EMPTY_PATH)) != 0)
+	if ((flags & ~(AT_SYMLINK_FOLLOW | AT_EMPTY_PATH |
+		       AT_LINK_REPLACE)) != 0)
 		return -EINVAL;
 	/*
 	 * To use null names we require CAP_DAC_READ_SEARCH
@@ -4229,44 +4273,94 @@ int do_linkat(int olddfd, const char __user *oldname, int newdfd,
 
 	if (flags & AT_SYMLINK_FOLLOW)
 		how |= LOOKUP_FOLLOW;
+
+	if (flags & AT_LINK_REPLACE)
+		target_flags = LOOKUP_RENAME_TARGET;
+	else
+		target_flags = LOOKUP_CREATE | LOOKUP_EXCL;
 retry:
 	error = user_path_at(olddfd, oldname, how, &old_path);
 	if (error)
 		return error;
 
-	new_dentry = user_path_create(newdfd, newname, &new_path,
-					(how & LOOKUP_REVAL));
-	error = PTR_ERR(new_dentry);
-	if (IS_ERR(new_dentry))
-		goto out;
+	to = filename_parentat(newdfd, getname(newname), how & LOOKUP_REVAL,
+			       &new_path, &new_last, &new_type);
+	if (IS_ERR(to)) {
+		error = PTR_ERR(to);
+		goto exit1;
+	}
 
-	error = -EXDEV;
-	if (old_path.mnt != new_path.mnt)
-		goto out_dput;
-	error = may_linkat(&old_path);
-	if (unlikely(error))
-		goto out_dput;
-	error = security_path_link(old_path.dentry, &new_path, new_dentry);
+	if (old_path.mnt != new_path.mnt) {
+		error = -EXDEV;
+		goto exit2;
+	}
+
+	if (new_type != LAST_NORM) {
+		if (flags & AT_LINK_REPLACE)
+			error = -EISDIR;
+		else
+			error = -EEXIST;
+		goto exit2;
+	}
+
+	error = mnt_want_write(old_path.mnt);
 	if (error)
-		goto out_dput;
-	error = vfs_link(old_path.dentry, new_path.dentry->d_inode, new_dentry, &delegated_inode);
-out_dput:
-	done_path_create(&new_path, new_dentry);
-	if (delegated_inode) {
-		error = break_deleg_wait(&delegated_inode);
-		if (!error) {
-			path_put(&old_path);
-			goto retry;
+		goto exit2;
+
+retry_deleg:
+	inode_lock_nested(new_path.dentry->d_inode, I_MUTEX_PARENT);
+
+	new_dentry = __lookup_hash(&new_last, new_path.dentry,
+				   (how & LOOKUP_REVAL) | target_flags);
+	if (IS_ERR(new_dentry)) {
+		error = PTR_ERR(new_dentry);
+		goto exit3;
+	}
+	if (!(flags & AT_LINK_REPLACE) && d_is_positive(new_dentry)) {
+		error = -EEXIST;
+		goto exit4;
+	}
+	if (new_last.name[new_last.len]) {
+		if (d_is_negative(new_dentry)) {
+			error = -ENOENT;
+			goto exit4;
+		}
+		if (!d_is_dir(old_path.dentry)) {
+			error = -ENOTDIR;
+			goto exit4;
 		}
 	}
-	if (retry_estale(error, how)) {
-		path_put(&old_path);
+
+	error = may_linkat(&old_path);
+	if (unlikely(error))
+		goto exit4;
+	error = security_path_link(old_path.dentry, &new_path, new_dentry);
+	if (error)
+		goto exit4;
+	error = vfs_link(old_path.dentry, new_path.dentry->d_inode, new_dentry,
+			 &delegated_inode, flags & AT_LINK_REPLACE);
+exit4:
+	dput(new_dentry);
+exit3:
+	inode_unlock(new_path.dentry->d_inode);
+	if (delegated_inode) {
+		error = break_deleg_wait(&delegated_inode);
+		if (!error)
+			goto retry_deleg;
+	}
+	mnt_drop_write(old_path.mnt);
+exit2:
+	if (retry_estale(error, how))
+		should_retry = true;
+	path_put(&new_path);
+	putname(to);
+exit1:
+	path_put(&old_path);
+	if (should_retry) {
+		should_retry = false;
 		how |= LOOKUP_REVAL;
 		goto retry;
 	}
-out:
-	path_put(&old_path);
-
 	return error;
 }
 

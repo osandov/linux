@@ -99,6 +99,7 @@
 #define AT_STATX_DONT_SYNC	0x4000	/* - Don't sync attributes with the server */
 
 #define AT_RECURSIVE		0x8000	/* Apply to the entire subtree */
+#define AT_LINK_REPLACE		0x10000	/* Replace link() target */
 
 
 #endif /* _UAPI_LINUX_FCNTL_H */
