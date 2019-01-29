@@ -90,11 +90,8 @@ int sbitmap_init_node(struct sbitmap *sb, unsigned int depth, int shift,
 	if (!sb->map)
 		return -ENOMEM;
 
-	for (i = 0; i < sb->map_nr; i++) {
-		sb->map[i].depth = min(depth, bits_per_word);
-		depth -= sb->map[i].depth;
+	for (i = 0; i < sb->map_nr; i++)
 		spin_lock_init(&sb->map[i].swap_lock);
-	}
 	return 0;
 }
 EXPORT_SYMBOL_GPL(sbitmap_init_node);
@@ -108,16 +105,11 @@ void sbitmap_resize(struct sbitmap *sb, unsigned int depth)
 		sbitmap_deferred_clear(sb, i);
 
 	sb->depth = depth;
-	sb->map_nr = DIV_ROUND_UP(sb->depth, bits_per_word);
-
-	for (i = 0; i < sb->map_nr; i++) {
-		sb->map[i].depth = min(depth, bits_per_word);
-		depth -= sb->map[i].depth;
-	}
+	sb->map_nr = DIV_ROUND_UP(depth, bits_per_word);
 }
 EXPORT_SYMBOL_GPL(sbitmap_resize);
 
-static int __sbitmap_get_word(unsigned long *word, unsigned long depth,
+static int __sbitmap_get_word(unsigned long *word, unsigned int depth,
 			      unsigned int hint, bool wrap)
 {
 	unsigned int orig_hint = hint;
@@ -156,8 +148,8 @@ static int sbitmap_find_bit_in_index(struct sbitmap *sb, int index,
 
 	do {
 		nr = __sbitmap_get_word(&sb->map[index].word,
-					sb->map[index].depth, alloc_hint,
-					!round_robin);
+					sbitmap_word_depth(sb, index),
+					alloc_hint, !round_robin);
 		if (nr != -1)
 			break;
 		if (!sbitmap_deferred_clear(sb, index))
@@ -203,7 +195,7 @@ int sbitmap_get(struct sbitmap *sb, unsigned int alloc_hint, bool round_robin)
 EXPORT_SYMBOL_GPL(sbitmap_get);
 
 int sbitmap_get_shallow(struct sbitmap *sb, unsigned int alloc_hint,
-			unsigned long shallow_depth)
+			unsigned int shallow_depth)
 {
 	unsigned int i, index;
 	int nr = -1;
@@ -213,7 +205,8 @@ int sbitmap_get_shallow(struct sbitmap *sb, unsigned int alloc_hint,
 	for (i = 0; i < sb->map_nr; i++) {
 again:
 		nr = __sbitmap_get_word(&sb->map[index].word,
-					min(sb->map[index].depth, shallow_depth),
+					min(sbitmap_word_depth(sb, index),
+					    shallow_depth),
 					SB_NR_TO_BIT(sb, alloc_hint), true);
 		if (nr != -1) {
 			nr += index << sb->shift;
@@ -255,11 +248,12 @@ bool sbitmap_any_bit_clear(const struct sbitmap *sb)
 
 	for (i = 0; i < sb->map_nr; i++) {
 		const struct sbitmap_word *word = &sb->map[i];
+		unsigned int word_depth = sbitmap_word_depth(sb, i);
 		unsigned long mask = word->word & ~word->cleared;
 		unsigned long ret;
 
-		ret = find_first_zero_bit(&mask, word->depth);
-		if (ret < word->depth)
+		ret = find_first_zero_bit(&mask, word_depth);
+		if (ret < word_depth)
 			return true;
 	}
 	return false;
@@ -272,11 +266,12 @@ static unsigned int __sbitmap_weight(const struct sbitmap *sb, bool set)
 
 	for (i = 0; i < sb->map_nr; i++) {
 		const struct sbitmap_word *word = &sb->map[i];
+		unsigned int word_depth = sbitmap_word_depth(sb, i);
 
 		if (set)
-			weight += bitmap_weight(&word->word, word->depth);
+			weight += bitmap_weight(&word->word, word_depth);
 		else
-			weight += bitmap_weight(&word->cleared, word->depth);
+			weight += bitmap_weight(&word->cleared, word_depth);
 	}
 	return weight;
 }
@@ -322,7 +317,7 @@ void sbitmap_bitmap_show(struct sbitmap *sb, struct seq_file *m)
 
 	for (i = 0; i < sb->map_nr; i++) {
 		unsigned long word = READ_ONCE(sb->map[i].word);
-		unsigned int word_bits = READ_ONCE(sb->map[i].depth);
+		unsigned int word_bits = sbitmap_word_depth(sb, i);
 
 		while (word_bits > 0) {
 			unsigned int bits = min(8 - byte_bits, word_bits);

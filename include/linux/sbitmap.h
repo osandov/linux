@@ -30,14 +30,9 @@ struct seq_file;
  */
 struct sbitmap_word {
 	/**
-	 * @depth: Number of bits being used in @word/@cleared
-	 */
-	unsigned long depth;
-
-	/**
 	 * @word: word holding free bits
 	 */
-	unsigned long word ____cacheline_aligned_in_smp;
+	unsigned long word;
 
 	/**
 	 * @cleared: word holding cleared bits
@@ -217,7 +212,7 @@ int sbitmap_get(struct sbitmap *sb, unsigned int alloc_hint, bool round_robin);
  * Return: Non-negative allocated bit number if successful, -1 otherwise.
  */
 int sbitmap_get_shallow(struct sbitmap *sb, unsigned int alloc_hint,
-			unsigned long shallow_depth);
+			unsigned int shallow_depth);
 
 /**
  * sbitmap_any_bit_set() - Check for a set bit in a &struct sbitmap.
@@ -235,6 +230,21 @@ bool sbitmap_any_bit_set(const struct sbitmap *sb);
  * Return: true if any bit in the bitmap is clear, false otherwise.
  */
 bool sbitmap_any_bit_clear(const struct sbitmap *sb);
+
+static inline unsigned int sbitmap_word_depth(const struct sbitmap *sb,
+					      unsigned int index)
+{
+	/*
+	 * The sbitmap can be resized at any time, so make sure we use the same
+	 * depth for the comparison and subtraction.
+	 */
+	unsigned int depth = READ_ONCE(sb->depth);
+	unsigned int index_depth = index << sb->shift;
+
+	if (index_depth >= depth)
+		return 0;
+	return min(1U << sb->shift, depth - index_depth);
+}
 
 #define SB_NR_TO_INDEX(sb, bitnr) ((bitnr) >> (sb)->shift)
 #define SB_NR_TO_BIT(sb, bitnr) ((bitnr) & ((1U << (sb)->shift) - 1U))
@@ -266,10 +276,10 @@ static inline void __sbitmap_for_each_set(struct sbitmap *sb,
 
 	while (scanned < sb->depth) {
 		unsigned long word;
-		unsigned int depth = min_t(unsigned int,
-					   sb->map[index].depth - nr,
-					   sb->depth - scanned);
+		unsigned int depth;
 
+		depth = min(sbitmap_word_depth(sb, index) - nr,
+			    sb->depth - scanned);
 		scanned += depth;
 		word = sb->map[index].word & ~sb->map[index].cleared;
 		if (!word)
