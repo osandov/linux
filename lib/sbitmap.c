@@ -206,8 +206,7 @@ int sbitmap_get_shallow(struct sbitmap *sb, unsigned int alloc_hint,
 again:
 		nr = __sbitmap_get_word(&sb->map[index].word,
 					min(sbitmap_word_depth(sb, index),
-					    shallow_depth),
-					SB_NR_TO_BIT(sb, alloc_hint), true);
+					    shallow_depth), 0, true);
 		if (nr != -1) {
 			nr += index << sb->shift;
 			break;
@@ -217,13 +216,8 @@ again:
 			goto again;
 
 		/* Jump to next index. */
-		index++;
-		alloc_hint = index << sb->shift;
-
-		if (index >= sb->map_nr) {
+		if (++index >= sb->map_nr)
 			index = 0;
-			alloc_hint = 0;
-		}
 	}
 
 	return nr;
