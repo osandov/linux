@@ -214,6 +214,9 @@ int sbitmap_get(struct sbitmap *sb, unsigned int alloc_hint, bool round_robin);
 int sbitmap_get_shallow(struct sbitmap *sb, unsigned int alloc_hint,
 			unsigned int shallow_depth);
 
+unsigned int sbitmap_get_batch(struct sbitmap *sb, unsigned int alloc_hint,
+			       int *nrs, unsigned int n);
+
 /**
  * sbitmap_any_bit_set() - Check for a set bit in a &struct sbitmap.
  * @sb: Bitmap to check.

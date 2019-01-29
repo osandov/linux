@@ -210,6 +210,51 @@ again:
 }
 EXPORT_SYMBOL_GPL(sbitmap_get_shallow);
 
+static void __sbitmap_get_batch_word(unsigned long *word, unsigned int depth,
+				     unsigned int hint, int *nrs,
+				     unsigned int n, unsigned int *ret)
+{
+	while (*ret < n) {
+		int nr;
+
+		nr = find_next_zero_bit(word, depth, hint);
+		if (unlikely(nr >= depth))
+			return;
+
+		if (!test_and_set_bit_lock(nr, word)) {
+			nrs[(*ret)++] = nr;
+			continue;
+		}
+
+		hint = nr + 1;
+	}
+}
+
+unsigned int sbitmap_get_batch(struct sbitmap *sb, unsigned int alloc_hint,
+			       int *nrs, unsigned int n)
+{
+	unsigned int i, index, ret = 0;
+
+	index = SB_NR_TO_INDEX(sb, alloc_hint);
+	for (i = 0; ret < n && i < sb->map_nr; i++) {
+again:
+		__sbitmap_get_batch_word(&sb->map[index].word,
+					 sbitmap_word_depth(sb, index),
+					 0, nrs, n, &ret);
+		if (ret < n) {
+			if (sbitmap_deferred_clear(sb, index))
+				goto again;
+		} else {
+			break;
+		}
+
+		if (++index >= sb->map_nr)
+			index = 0;
+	}
+	return ret;
+}
+EXPORT_SYMBOL_GPL(sbitmap_get_batch);
+
 bool sbitmap_any_bit_set(const struct sbitmap *sb)
 {
 	unsigned int i;
