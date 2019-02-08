@@ -2390,13 +2390,14 @@ out:
 	return ret;
 }
 
-static int send_truncate(struct send_ctx *sctx, u64 ino, u64 gen, u64 size)
+static int send_truncate(struct send_ctx *sctx, u64 size)
 {
 	struct btrfs_fs_info *fs_info = sctx->send_root->fs_info;
 	int ret = 0;
 	struct fs_path *p;
 
-	btrfs_debug(fs_info, "send_truncate %llu size=%llu", ino, size);
+	btrfs_debug(fs_info, "send_truncate %llu size=%llu", sctx->cur_ino,
+		    size);
 
 	p = fs_path_alloc();
 	if (!p)
@@ -2406,7 +2407,7 @@ static int send_truncate(struct send_ctx *sctx, u64 ino, u64 gen, u64 size)
 	if (ret < 0)
 		goto out;
 
-	ret = get_cur_path(sctx, ino, gen, p);
+	ret = get_cur_path(sctx, sctx->cur_ino, sctx->cur_inode_gen, p);
 	if (ret < 0)
 		goto out;
 	TLV_PUT_PATH(sctx, BTRFS_SEND_A_PATH, p);
@@ -2420,13 +2421,13 @@ out:
 	return ret;
 }
 
-static int send_chmod(struct send_ctx *sctx, u64 ino, u64 gen, u64 mode)
+static int send_chmod(struct send_ctx *sctx, u64 mode)
 {
 	struct btrfs_fs_info *fs_info = sctx->send_root->fs_info;
 	int ret = 0;
 	struct fs_path *p;
 
-	btrfs_debug(fs_info, "send_chmod %llu mode=0%llo", ino, mode);
+	btrfs_debug(fs_info, "send_chmod %llu mode=0%llo", sctx->cur_ino, mode);
 
 	p = fs_path_alloc();
 	if (!p)
@@ -2436,7 +2437,7 @@ static int send_chmod(struct send_ctx *sctx, u64 ino, u64 gen, u64 mode)
 	if (ret < 0)
 		goto out;
 
-	ret = get_cur_path(sctx, ino, gen, p);
+	ret = get_cur_path(sctx, sctx->cur_ino, sctx->cur_inode_gen, p);
 	if (ret < 0)
 		goto out;
 	TLV_PUT_PATH(sctx, BTRFS_SEND_A_PATH, p);
@@ -2450,14 +2451,14 @@ out:
 	return ret;
 }
 
-static int send_chown(struct send_ctx *sctx, u64 ino, u64 gen, u64 uid, u64 gid)
+static int send_chown(struct send_ctx *sctx, u64 uid, u64 gid)
 {
 	struct btrfs_fs_info *fs_info = sctx->send_root->fs_info;
 	int ret = 0;
 	struct fs_path *p;
 
 	btrfs_debug(fs_info, "send_chown %llu uid=%llu, gid=%llu",
-		    ino, uid, gid);
+		    sctx->cur_ino, uid, gid);
 
 	p = fs_path_alloc();
 	if (!p)
@@ -2467,7 +2468,7 @@ static int send_chown(struct send_ctx *sctx, u64 ino, u64 gen, u64 uid, u64 gid)
 	if (ret < 0)
 		goto out;
 
-	ret = get_cur_path(sctx, ino, gen, p);
+	ret = get_cur_path(sctx, sctx->cur_ino, sctx->cur_inode_gen, p);
 	if (ret < 0)
 		goto out;
 	TLV_PUT_PATH(sctx, BTRFS_SEND_A_PATH, p);
@@ -5942,23 +5943,19 @@ static int finish_inode_if_needed(struct send_ctx *sctx, int at_end)
 			}
 		}
 		if (need_truncate) {
-			ret = send_truncate(sctx, sctx->cur_ino,
-					    sctx->cur_inode_gen,
-					    sctx->cur_inode_size);
+			ret = send_truncate(sctx, sctx->cur_inode_size);
 			if (ret < 0)
 				goto out;
 		}
 	}
 
 	if (need_chown) {
-		ret = send_chown(sctx, sctx->cur_ino, sctx->cur_inode_gen,
-				left_uid, left_gid);
+		ret = send_chown(sctx, left_uid, left_gid);
 		if (ret < 0)
 			goto out;
 	}
 	if (need_chmod) {
-		ret = send_chmod(sctx, sctx->cur_ino, sctx->cur_inode_gen,
-				left_mode);
+		ret = send_chmod(sctx, left_mode);
 		if (ret < 0)
 			goto out;
 	}
