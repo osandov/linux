@@ -6277,13 +6277,10 @@ static int finish_inode_if_needed(struct send_ctx *sctx, int at_end)
 			      sctx->left_inode.gid != sctx->right_inode.gid);
 		need_chmod = (!S_ISLNK(sctx->cur_inode_info->mode) &&
 			      sctx->left_inode.mode != sctx->right_inode.mode);
-		if (sctx->left_inode.size < sctx->right_inode.size)
-			need_truncate = true;
-		else if (sctx->left_inode.size > sctx->right_inode.size)
-			need_truncate = (sctx->cur_inode_next_write_offset !=
-					 sctx->cur_inode_info->size);
-		else
-			need_truncate = false;
+		need_truncate = (sctx->left_inode.size >
+				 sctx->right_inode.size &&
+				 sctx->cur_inode_next_write_offset !=
+				 sctx->cur_inode_info->size);
 	}
 
 	if (S_ISREG(sctx->cur_inode_info->mode)) {
@@ -6598,6 +6595,11 @@ static int changed_inode(struct send_ctx *sctx,
 			sctx->cur_inode_info = &sctx->left_inode;
 			sctx->cur_inode_new = false;
 			sctx->cur_inode_deleted = false;
+			if (S_ISREG(sctx->left_inode.mode) &&
+			    sctx->left_inode.size < sctx->right_inode.size) {
+				ret = send_truncate(sctx,
+						    sctx->left_inode.size);
+			}
 		}
 	}
 
