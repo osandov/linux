@@ -5889,7 +5889,7 @@ static int finish_inode_if_needed(struct send_ctx *sctx, int at_end)
 	if (!at_end && sctx->cmp_key->objectid == sctx->cur_ino)
 		goto out;
 
-	if (!sctx->parent_root || sctx->cur_inode_new) {
+	if (sctx->cur_inode_new) {
 		need_chown = true;
 		need_chmod = !S_ISLNK(sctx->cur_inode->mode);
 	} else {
