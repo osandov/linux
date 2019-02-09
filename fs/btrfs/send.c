@@ -6271,7 +6271,7 @@ static int finish_inode_if_needed(struct send_ctx *sctx, int at_end)
 	if (ret < 0)
 		goto out;
 
-	if (!sctx->parent_root || sctx->cur_inode_new) {
+	if (sctx->cur_inode_new) {
 		need_chown = 1;
 		if (!S_ISLNK(sctx->cur_inode_mode))
 			need_chmod = 1;
