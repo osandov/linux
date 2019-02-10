@@ -5749,39 +5749,6 @@ out:
 	return ret;
 }
 
-static int send_write_or_clone(struct send_ctx *sctx,
-			       struct btrfs_path *path,
-			       struct btrfs_key *key,
-			       struct clone_root *clone_root)
-{
-	int ret = 0;
-	u64 offset = key->offset;
-	u64 end;
-	u64 bs = sctx->send_root->fs_info->sb->s_blocksize;
-
-	end = min_t(u64, btrfs_file_extent_end(path),
-		    sctx->cur_inode_info->size);
-	if (offset >= end)
-		return 0;
-
-	if (clone_root && IS_ALIGNED(end, bs)) {
-		struct btrfs_file_extent_item *ei;
-		u64 disk_byte;
-		u64 data_offset;
-
-		ei = btrfs_item_ptr(path->nodes[0], path->slots[0],
-				    struct btrfs_file_extent_item);
-		disk_byte = btrfs_file_extent_disk_bytenr(path->nodes[0], ei);
-		data_offset = btrfs_file_extent_offset(path->nodes[0], ei);
-		ret = clone_range(sctx, path, clone_root, disk_byte,
-				  data_offset, offset, end - offset);
-	} else {
-		ret = send_extent_data(sctx, path, offset, end - offset);
-	}
-	sctx->cur_inode_next_write_offset = end;
-	return ret;
-}
-
 static int is_extent_unchanged(struct send_ctx *sctx,
 			       struct btrfs_path *left_path,
 			       struct btrfs_key *ekey)
@@ -6115,27 +6082,26 @@ static int process_extent(struct send_ctx *sctx,
 			  struct btrfs_path *path,
 			  struct btrfs_key *key)
 {
+	u64 bs = sctx->send_root->fs_info->sb->s_blocksize;
+	struct btrfs_file_extent_item *ei;
 	struct clone_root *found_clone = NULL;
-	int ret = 0;
+	u64 end;
+	u8 type;
+	int ret;
 
 	if (S_ISLNK(sctx->cur_inode_info->mode))
 		return 0;
 
+	ei = btrfs_item_ptr(path->nodes[0], path->slots[0],
+			    struct btrfs_file_extent_item);
+	type = btrfs_file_extent_type(path->nodes[0], ei);
 	if (sctx->parent_root && !sctx->cur_inode_new) {
 		ret = is_extent_unchanged(sctx, path, key);
 		if (ret < 0)
-			goto out;
-		if (ret) {
-			ret = 0;
+			return ret;
+		if (ret)
 			goto out_hole;
-		}
 	} else {
-		struct btrfs_file_extent_item *ei;
-		u8 type;
-
-		ei = btrfs_item_ptr(path->nodes[0], path->slots[0],
-				    struct btrfs_file_extent_item);
-		type = btrfs_file_extent_type(path->nodes[0], ei);
 		if (type == BTRFS_FILE_EXTENT_PREALLOC ||
 		    type == BTRFS_FILE_EXTENT_REG) {
 			/*
@@ -6144,31 +6110,42 @@ static int process_extent(struct send_ctx *sctx,
 			 * we have enough commands queued up to justify rev'ing
 			 * the send spec.
 			 */
-			if (type == BTRFS_FILE_EXTENT_PREALLOC) {
-				ret = 0;
-				goto out;
-			}
+			if (type == BTRFS_FILE_EXTENT_PREALLOC)
+				return 0;
 
 			/* Have a hole, just skip it. */
-			if (btrfs_file_extent_disk_bytenr(path->nodes[0], ei) == 0) {
-				ret = 0;
-				goto out;
-			}
+			if (btrfs_file_extent_disk_bytenr(path->nodes[0], ei) == 0)
+				return 0;
 		}
 	}
+
+	end = min_t(u64, btrfs_file_extent_end(path),
+		    sctx->cur_inode_info->size);
+	if (key->offset >= end)
+		goto out_hole;
 
 	ret = find_extent_clone(sctx, path, key->objectid, key->offset,
 				sctx->cur_inode_info->size, &found_clone);
 	if (ret != -ENOENT && ret < 0)
-		goto out;
+		return ret;
 
-	ret = send_write_or_clone(sctx, path, key, found_clone);
+	if (found_clone && IS_ALIGNED(end, bs)) {
+		u64 disk_byte;
+		u64 data_offset;
+
+		disk_byte = btrfs_file_extent_disk_bytenr(path->nodes[0], ei);
+		data_offset = btrfs_file_extent_offset(path->nodes[0], ei);
+		ret = clone_range(sctx, path, found_clone, disk_byte,
+				  data_offset, key->offset, end - key->offset);
+	} else {
+		ret = send_extent_data(sctx, path, key->offset,
+				       end - key->offset);
+	}
 	if (ret)
-		goto out;
+		return ret;
+	sctx->cur_inode_next_write_offset = end;
 out_hole:
-	ret = maybe_send_hole(sctx, path, key);
-out:
-	return ret;
+	return maybe_send_hole(sctx, path, key);
 }
 
 static int process_all_extents(struct send_ctx *sctx)
