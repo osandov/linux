@@ -5111,12 +5111,87 @@ out:
 	return ret;
 }
 
+static int range_is_hole_in_parent(struct send_ctx *sctx,
+				   const u64 start,
+				   const u64 end)
+{
+	struct btrfs_path *path;
+	struct btrfs_key key;
+	struct btrfs_root *root = sctx->parent_root;
+	u64 search_start = start;
+	int ret;
+
+	path = alloc_path_for_send();
+	if (!path)
+		return -ENOMEM;
+
+	key.objectid = sctx->cur_ino;
+	key.type = BTRFS_EXTENT_DATA_KEY;
+	key.offset = search_start;
+	ret = btrfs_search_slot(NULL, root, &key, path, 0, 0);
+	if (ret < 0)
+		goto out;
+	if (ret > 0 && path->slots[0] > 0)
+		path->slots[0]--;
+
+	while (search_start < end) {
+		struct extent_buffer *leaf = path->nodes[0];
+		int slot = path->slots[0];
+		struct btrfs_file_extent_item *fi;
+		u64 extent_end;
+
+		if (slot >= btrfs_header_nritems(leaf)) {
+			ret = btrfs_next_leaf(root, path);
+			if (ret < 0)
+				goto out;
+			else if (ret > 0)
+				break;
+			continue;
+		}
+
+		btrfs_item_key_to_cpu(leaf, &key, slot);
+		if (key.objectid < sctx->cur_ino ||
+		    key.type < BTRFS_EXTENT_DATA_KEY)
+			goto next;
+		if (key.objectid > sctx->cur_ino ||
+		    key.type > BTRFS_EXTENT_DATA_KEY ||
+		    key.offset >= end)
+			break;
+
+		fi = btrfs_item_ptr(leaf, slot, struct btrfs_file_extent_item);
+		extent_end = btrfs_file_extent_end(path);
+		if (extent_end <= start)
+			goto next;
+		if (btrfs_file_extent_disk_bytenr(leaf, fi) == 0) {
+			search_start = extent_end;
+			goto next;
+		}
+		ret = 0;
+		goto out;
+next:
+		path->slots[0]++;
+	}
+	ret = 1;
+out:
+	btrfs_free_path(path);
+	return ret;
+}
+
 static int send_hole(struct send_ctx *sctx, u64 end)
 {
 	struct fs_path *p = NULL;
 	u64 read_size = max_send_read_size(sctx);
 	u64 offset = sctx->cur_inode_last_extent;
-	int ret = 0;
+	int ret;
+
+	if (end <= offset)
+		return 0;
+
+	ret = range_is_hole_in_parent(sctx, offset, end);
+	if (ret < 0)
+		return ret;
+	if (ret)
+		return 0;
 
 	/*
 	 * A hole that starts at EOF or beyond it. Since we do not yet support
@@ -5969,72 +6044,6 @@ out:
 	return ret;
 }
 
-static int range_is_hole_in_parent(struct send_ctx *sctx,
-				   const u64 start,
-				   const u64 end)
-{
-	struct btrfs_path *path;
-	struct btrfs_key key;
-	struct btrfs_root *root = sctx->parent_root;
-	u64 search_start = start;
-	int ret;
-
-	path = alloc_path_for_send();
-	if (!path)
-		return -ENOMEM;
-
-	key.objectid = sctx->cur_ino;
-	key.type = BTRFS_EXTENT_DATA_KEY;
-	key.offset = search_start;
-	ret = btrfs_search_slot(NULL, root, &key, path, 0, 0);
-	if (ret < 0)
-		goto out;
-	if (ret > 0 && path->slots[0] > 0)
-		path->slots[0]--;
-
-	while (search_start < end) {
-		struct extent_buffer *leaf = path->nodes[0];
-		int slot = path->slots[0];
-		struct btrfs_file_extent_item *fi;
-		u64 extent_end;
-
-		if (slot >= btrfs_header_nritems(leaf)) {
-			ret = btrfs_next_leaf(root, path);
-			if (ret < 0)
-				goto out;
-			else if (ret > 0)
-				break;
-			continue;
-		}
-
-		btrfs_item_key_to_cpu(leaf, &key, slot);
-		if (key.objectid < sctx->cur_ino ||
-		    key.type < BTRFS_EXTENT_DATA_KEY)
-			goto next;
-		if (key.objectid > sctx->cur_ino ||
-		    key.type > BTRFS_EXTENT_DATA_KEY ||
-		    key.offset >= end)
-			break;
-
-		fi = btrfs_item_ptr(leaf, slot, struct btrfs_file_extent_item);
-		extent_end = btrfs_file_extent_end(path);
-		if (extent_end <= start)
-			goto next;
-		if (btrfs_file_extent_disk_bytenr(leaf, fi) == 0) {
-			search_start = extent_end;
-			goto next;
-		}
-		ret = 0;
-		goto out;
-next:
-		path->slots[0]++;
-	}
-	ret = 1;
-out:
-	btrfs_free_path(path);
-	return ret;
-}
-
 static int maybe_send_hole(struct send_ctx *sctx, struct btrfs_path *path,
 			   struct btrfs_key *key)
 {
@@ -6063,17 +6072,9 @@ static int maybe_send_hole(struct send_ctx *sctx, struct btrfs_path *path,
 			return ret;
 	}
 
-	if (sctx->cur_inode_last_extent < key->offset) {
-		ret = range_is_hole_in_parent(sctx,
-					      sctx->cur_inode_last_extent,
-					      key->offset);
-		if (ret < 0)
-			return ret;
-		else if (ret == 0)
-			ret = send_hole(sctx, key->offset);
-		else
-			ret = 0;
-	}
+	ret = send_hole(sctx, key->offset);
+	if (ret)
+		return ret;
 	sctx->cur_inode_last_extent = btrfs_file_extent_end(path);
 	return ret;
 }
@@ -6269,13 +6270,9 @@ static int finish_inode_if_needed(struct send_ctx *sctx, int at_end)
 				if (ret)
 					goto out;
 			}
-			if (sctx->cur_inode_last_extent <
-			    sctx->cur_inode_info->size) {
-				ret = send_hole(sctx,
-						sctx->cur_inode_info->size);
-				if (ret)
-					goto out;
-			}
+			ret = send_hole(sctx, sctx->cur_inode_info->size);
+			if (ret)
+				goto out;
 		}
 		if (need_truncate) {
 			ret = send_truncate(sctx, sctx->cur_inode_info->size);
