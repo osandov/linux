@@ -5296,60 +5296,6 @@ out:
 	return ret;
 }
 
-static int send_write_or_clone(struct send_ctx *sctx,
-			       struct btrfs_path *path,
-			       struct btrfs_key *key,
-			       struct clone_root *clone_root)
-{
-	int ret = 0;
-	struct btrfs_file_extent_item *ei;
-	u64 offset = key->offset;
-	u64 len;
-	u8 type;
-	u64 bs = sctx->send_root->fs_info->sb->s_blocksize;
-
-	ei = btrfs_item_ptr(path->nodes[0], path->slots[0],
-			struct btrfs_file_extent_item);
-	type = btrfs_file_extent_type(path->nodes[0], ei);
-	if (type == BTRFS_FILE_EXTENT_INLINE) {
-		len = btrfs_file_extent_ram_bytes(path->nodes[0], ei);
-		/*
-		 * it is possible the inline item won't cover the whole page,
-		 * but there may be items after this page.  Make
-		 * sure to send the whole thing
-		 */
-		len = PAGE_ALIGN(len);
-	} else {
-		len = btrfs_file_extent_num_bytes(path->nodes[0], ei);
-	}
-
-	if (offset >= sctx->cur_inode->size) {
-		ret = 0;
-		goto out;
-	}
-	if (offset + len > sctx->cur_inode->size)
-		len = sctx->cur_inode->size - offset;
-	if (len == 0) {
-		ret = 0;
-		goto out;
-	}
-
-	if (clone_root && IS_ALIGNED(offset + len, bs)) {
-		u64 disk_byte;
-		u64 data_offset;
-
-		disk_byte = btrfs_file_extent_disk_bytenr(path->nodes[0], ei);
-		data_offset = btrfs_file_extent_offset(path->nodes[0], ei);
-		ret = clone_range(sctx, clone_root, disk_byte, data_offset,
-				  offset, len);
-	} else {
-		ret = send_extent_data(sctx, offset, len);
-	}
-	sctx->cur_inode_next_write_offset = offset + len;
-out:
-	return ret;
-}
-
 static int is_extent_unchanged(struct send_ctx *sctx,
 			       struct btrfs_path *left_path,
 			       struct btrfs_key *ekey)
@@ -5721,27 +5667,26 @@ static int process_extent(struct send_ctx *sctx,
 			  struct btrfs_path *path,
 			  struct btrfs_key *key)
 {
+	u64 bs = sctx->send_root->fs_info->sb->s_blocksize;
+	struct btrfs_file_extent_item *ei;
 	struct clone_root *found_clone = NULL;
-	int ret = 0;
+	u64 offset, len;
+	u8 type;
+	int ret;
 
 	if (S_ISLNK(sctx->cur_inode->mode))
 		return 0;
 
+	ei = btrfs_item_ptr(path->nodes[0], path->slots[0],
+			    struct btrfs_file_extent_item);
+	type = btrfs_file_extent_type(path->nodes[0], ei);
 	if (sctx->parent_root && !sctx->cur_inode_new) {
 		ret = is_extent_unchanged(sctx, path, key);
 		if (ret < 0)
-			goto out;
-		if (ret) {
-			ret = 0;
+			return ret;
+		if (ret)
 			goto out_hole;
-		}
 	} else {
-		struct btrfs_file_extent_item *ei;
-		u8 type;
-
-		ei = btrfs_item_ptr(path->nodes[0], path->slots[0],
-				    struct btrfs_file_extent_item);
-		type = btrfs_file_extent_type(path->nodes[0], ei);
 		if (type == BTRFS_FILE_EXTENT_PREALLOC ||
 		    type == BTRFS_FILE_EXTENT_REG) {
 			/*
@@ -5750,31 +5695,55 @@ static int process_extent(struct send_ctx *sctx,
 			 * we have enough commands queued up to justify rev'ing
 			 * the send spec.
 			 */
-			if (type == BTRFS_FILE_EXTENT_PREALLOC) {
-				ret = 0;
-				goto out;
-			}
+			if (type == BTRFS_FILE_EXTENT_PREALLOC)
+				return 0;
 
 			/* Have a hole, just skip it. */
-			if (btrfs_file_extent_disk_bytenr(path->nodes[0], ei) == 0) {
-				ret = 0;
-				goto out;
-			}
+			if (btrfs_file_extent_disk_bytenr(path->nodes[0], ei) == 0)
+				return 0;
 		}
 	}
+
+	offset = key->offset;
+	if (type == BTRFS_FILE_EXTENT_INLINE) {
+		len = btrfs_file_extent_ram_bytes(path->nodes[0], ei);
+		/*
+		 * it is possible the inline item won't cover the whole page,
+		 * but there may be items after this page.  Make
+		 * sure to send the whole thing
+		 */
+		len = PAGE_ALIGN(len);
+	} else {
+		len = btrfs_file_extent_num_bytes(path->nodes[0], ei);
+	}
+	if (offset >= sctx->cur_inode->size)
+		goto out_hole;
+	if (offset + len > sctx->cur_inode->size)
+		len = sctx->cur_inode->size - offset;
+	if (len == 0)
+		goto out_hole;
 
 	ret = find_extent_clone(sctx, path, key->objectid, key->offset,
 				sctx->cur_inode->size, &found_clone);
 	if (ret != -ENOENT && ret < 0)
-		goto out;
+		return ret;
 
-	ret = send_write_or_clone(sctx, path, key, found_clone);
+	if (found_clone && IS_ALIGNED(offset + len, bs)) {
+		u64 disk_byte;
+		u64 data_offset;
+
+		disk_byte = btrfs_file_extent_disk_bytenr(path->nodes[0], ei);
+		data_offset = btrfs_file_extent_offset(path->nodes[0], ei);
+		ret = clone_range(sctx, found_clone, disk_byte, data_offset,
+				  offset, len);
+	} else {
+		ret = send_extent_data(sctx, offset, len);
+	}
 	if (ret)
-		goto out;
+		return ret;
+	sctx->cur_inode_next_write_offset = offset + len;
 out_hole:
-	ret = maybe_send_hole(sctx, path, key);
-out:
-	return ret;
+	return maybe_send_hole(sctx, path, key);
 }
 
 static int process_all_extents(struct send_ctx *sctx)
