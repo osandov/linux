@@ -128,8 +128,14 @@ struct send_ctx {
 	struct sctx_inode_info *cur_inode_info;
 	struct sctx_inode_info left_inode;
 	struct sctx_inode_info right_inode;
-	u64 cur_inode_last_extent;
-	u64 cur_inode_next_write_offset;
+	/*
+	 * We have sent all commands (write, clone, truncate) for everything
+	 * less than this offset. This is updated in 2 cases:
+	 *
+	 * 1. When we write or clone data.
+	 * 2. When we skip past a range which does not need to be written.
+	 */
+	u64 cur_inode_offset;
 	bool cur_inode_new;
 	bool cur_inode_new_gen;
 	bool cur_inode_deleted;
@@ -358,13 +364,6 @@ static struct waiting_dir_move *
 get_waiting_dir_move(struct send_ctx *sctx, u64 ino);
 
 static int is_waiting_for_rm(struct send_ctx *sctx, u64 dir_ino, u64 gen);
-
-static int need_send_hole(struct send_ctx *sctx)
-{
-	return (sctx->parent_root && !sctx->cur_inode_new &&
-		!sctx->cur_inode_new_gen && !sctx->cur_inode_deleted &&
-		S_ISREG(sctx->cur_inode_info->mode));
-}
 
 static void fs_path_reset(struct fs_path *p)
 {
@@ -1292,8 +1291,7 @@ static int __iterate_backrefs(u64 ino, u64 offset, u64 root, void *ctx_)
 		 * destination of the stream.
 		 */
 		if (ino == bctx->cur_objectid &&
-		    offset + bctx->extent_len >
-		    bctx->sctx->cur_inode_next_write_offset)
+		    offset + bctx->extent_len > bctx->sctx->cur_inode_offset)
 			return 0;
 	}
 
@@ -5188,19 +5186,47 @@ out:
 	return ret;
 }
 
+/* Skip the current offset past an extent that we aren't writing out. */
+static int skip_extent(struct send_ctx *sctx, u64 end)
+{
+	int ret;
+
+	/*
+	 * Usually, when a file needs to grow, it is extended by a write or
+	 * clone. However, if the new size lies within a hole or preallocated
+	 * extent, we need to extend it with an explicit truncate.
+	 */
+	if ((sctx->cur_inode_new ||
+	     sctx->left_inode.size > sctx->right_inode.size) &&
+	    sctx->cur_inode_offset < sctx->cur_inode_info->size &&
+	    end >= sctx->cur_inode_info->size) {
+		ret = send_truncate(sctx, sctx->cur_inode_info->size);
+		if (ret)
+			return ret;
+	}
+	sctx->cur_inode_offset = end;
+	return 0;
+}
+
 static int send_hole(struct send_ctx *sctx, u64 end)
 {
 	struct fs_path *p = NULL;
 	u64 read_size = max_send_read_size(sctx);
-	u64 offset = sctx->cur_inode_last_extent;
+	u64 offset = sctx->cur_inode_offset;
+	u64 orig_end = end;
 	int ret;
 
 	if (end <= offset)
 		return 0;
 
+	if (sctx->cur_inode_new) {
+		ret = 0;
+		goto out;
+	}
+
 	ret = non_hole_range_in_parent(sctx, &offset, &end);
 	if (ret)
-		return ret;
+		goto out;
 
 	/*
 	 * Don't go beyond the inode's i_size due to prealloc extents that start
@@ -5208,14 +5234,18 @@ static int send_hole(struct send_ctx *sctx, u64 end)
 	 */
 	end = min_t(u64, end, sctx->cur_inode_info->size);
 	if (end <= offset)
-		return 0;
+		goto out;
 
-	if (sctx->flags & BTRFS_SEND_FLAG_NO_FILE_DATA)
-		return send_update_extent(sctx, offset, end - offset);
+	if (sctx->flags & BTRFS_SEND_FLAG_NO_FILE_DATA) {
+		ret = send_update_extent(sctx, offset, end - offset);
+		goto out;
+	}
 
 	p = fs_path_alloc();
-	if (!p)
-		return -ENOMEM;
+	if (!p) {
+		ret = -ENOMEM;
+		goto out;
+	}
 	ret = get_cur_path(sctx, sctx->cur_ino, sctx->cur_inode_info->gen, p);
 	if (ret < 0)
 		goto tlv_put_failure;
@@ -5237,9 +5267,12 @@ static int send_hole(struct send_ctx *sctx, u64 end)
 			break;
 		offset += len;
 	}
-	sctx->cur_inode_next_write_offset = offset;
+	sctx->cur_inode_offset = offset;
 tlv_put_failure:
 	fs_path_free(p);
+out:
+	if (!ret)
+		ret = skip_extent(sctx, orig_end);
 	return ret;
 }
 
@@ -5809,7 +5842,7 @@ static int clone_range(struct send_ctx *sctx, struct btrfs_path *dst_path,
 		 */
 		if (clone_root->root == sctx->send_root &&
 		    clone_root->ino == sctx->cur_ino &&
-		    clone_root->offset >= sctx->cur_inode_next_write_offset)
+		    clone_root->offset >= sctx->cur_inode_offset)
 			break;
 
 		data_offset += clone_len;
@@ -5848,6 +5881,9 @@ static int is_extent_unchanged(struct send_ctx *sctx,
 	u64 right_gen;
 	u8 left_type;
 	u8 right_type;
+
+	if (sctx->cur_inode_new)
+		return 0;
 
 	path = alloc_path_for_send();
 	if (!path)
@@ -6016,6 +6052,11 @@ out:
 	return ret;
 }
 
+/*
+ * Advance the current offset to the end of the last (non-hole) extent at or
+ * before the given offset. This is necessary when btrfs_compare_trees() skips
+ * past identical subtrees, which means that we don't see every extent.
+ */
 static int get_last_extent(struct send_ctx *sctx, u64 offset)
 {
 	struct btrfs_path *path;
@@ -6023,67 +6064,61 @@ static int get_last_extent(struct send_ctx *sctx, u64 offset)
 	struct btrfs_key key;
 	int ret;
 
+	/* We see every extent for new files, so the offset is accurate. */
+	if (sctx->cur_inode_new)
+		return 0;
+
 	path = alloc_path_for_send();
 	if (!path)
 		return -ENOMEM;
 
-	sctx->cur_inode_last_extent = 0;
-
 	key.objectid = sctx->cur_ino;
 	key.type = BTRFS_EXTENT_DATA_KEY;
 	key.offset = offset;
-	ret = btrfs_search_slot_for_read(root, &key, path, 0, 1);
+	ret = btrfs_search_slot_for_read(root, &key, path, 0, 0);
 	if (ret < 0)
 		goto out;
-	ret = 0;
-	btrfs_item_key_to_cpu(path->nodes[0], &key, path->slots[0]);
-	if (key.objectid != sctx->cur_ino || key.type != BTRFS_EXTENT_DATA_KEY)
+	if (ret) {
+		ret = 0;
 		goto out;
+	}
+	for (;;) {
+		struct btrfs_file_extent_item *fi;
 
-	sctx->cur_inode_last_extent = btrfs_file_extent_end(path);
+		btrfs_item_key_to_cpu(path->nodes[0], &key, path->slots[0]);
+		if (key.objectid != sctx->cur_ino ||
+		    key.type != BTRFS_EXTENT_DATA_KEY)
+			break;
+
+		fi = btrfs_item_ptr(path->nodes[0], path->slots[0],
+				    struct btrfs_file_extent_item);
+		if (btrfs_file_extent_type(path->nodes[0], fi) ==
+		    BTRFS_FILE_EXTENT_REG &&
+		    btrfs_file_extent_disk_bytenr(path->nodes[0], fi) == 0) {
+			if (path->slots[0] == 0) {
+				ret = btrfs_prev_leaf(root, path);
+				if (ret < 0)
+					goto out;
+				if (ret)
+					break;
+				if (path->slots[0] !=
+				    btrfs_header_nritems(path->nodes[0]))
+					continue;
+			}
+			path->slots[0]--;
+			continue;
+		}
+		ret = skip_extent(sctx, btrfs_file_extent_end(path));
+		goto out;
+	}
+	ret = 0;
 out:
 	btrfs_free_path(path);
 	return ret;
 }
 
-static int maybe_send_hole(struct send_ctx *sctx, struct btrfs_path *path,
-			   struct btrfs_key *key)
-{
-	int ret = 0;
-
-	if (sctx->cur_ino != key->objectid || !need_send_hole(sctx))
-		return 0;
-
-	if (sctx->cur_inode_last_extent == (u64)-1) {
-		ret = get_last_extent(sctx, key->offset - 1);
-		if (ret)
-			return ret;
-	}
-
-	if (path->slots[0] == 0 &&
-	    sctx->cur_inode_last_extent < key->offset) {
-		/*
-		 * We might have skipped entire leafs that contained only
-		 * file extent items for our current inode. These leafs have
-		 * a generation number smaller (older) than the one in the
-		 * current leaf and the leaf our last extent came from, and
-		 * are located between these 2 leafs.
-		 */
-		ret = get_last_extent(sctx, key->offset - 1);
-		if (ret)
-			return ret;
-	}
-
-	ret = send_hole(sctx, key->offset);
-	if (ret)
-		return ret;
-	sctx->cur_inode_last_extent = btrfs_file_extent_end(path);
-	return ret;
-}
-
-static int process_extent(struct send_ctx *sctx,
-			  struct btrfs_path *path,
-			  struct btrfs_key *key)
+static int process_extent(struct send_ctx *sctx, struct btrfs_path *path,
+			  struct btrfs_key *key, bool same)
 {
 	u64 bs = sctx->send_root->fs_info->sb->s_blocksize;
 	struct btrfs_file_extent_item *ei;
@@ -6098,34 +6133,41 @@ static int process_extent(struct send_ctx *sctx,
 	ei = btrfs_item_ptr(path->nodes[0], path->slots[0],
 			    struct btrfs_file_extent_item);
 	type = btrfs_file_extent_type(path->nodes[0], ei);
-	if (sctx->parent_root && !sctx->cur_inode_new) {
+
+	if (path->slots[0] == 0 && key->offset) {
+		ret = get_last_extent(sctx, key->offset - 1);
+		if (ret)
+			return ret;
+	}
+
+	/*
+	 * Ignore holes. Since we don't have an fallocate command, treat
+	 * preallocated extents in new files as holes.
+	 */
+	if ((type == BTRFS_FILE_EXTENT_REG &&
+	    btrfs_file_extent_disk_bytenr(path->nodes[0], ei) == 0) ||
+	    (type == BTRFS_FILE_EXTENT_PREALLOC && sctx->cur_inode_new))
+		return 0;
+
+	ret = send_hole(sctx, key->offset);
+	if (ret)
+		return ret;
+
+	end = min_t(u64, btrfs_file_extent_end(path),
+		    sctx->cur_inode_info->size);
+
+	if (!same) {
 		ret = is_extent_unchanged(sctx, path, key);
 		if (ret < 0)
 			return ret;
 		if (ret)
-			goto out_hole;
-	} else {
-		if (type == BTRFS_FILE_EXTENT_PREALLOC ||
-		    type == BTRFS_FILE_EXTENT_REG) {
-			/*
-			 * The send spec does not have a prealloc command yet,
-			 * so just leave a hole for prealloc'ed extents until
-			 * we have enough commands queued up to justify rev'ing
-			 * the send spec.
-			 */
-			if (type == BTRFS_FILE_EXTENT_PREALLOC)
-				return 0;
-
-			/* Have a hole, just skip it. */
-			if (btrfs_file_extent_disk_bytenr(path->nodes[0], ei) == 0)
-				return 0;
-		}
+			same = true;
 	}
+	if (same)
+		return skip_extent(sctx, end);
 
-	end = min_t(u64, btrfs_file_extent_end(path),
-		    sctx->cur_inode_info->size);
 	if (key->offset >= end)
-		goto out_hole;
+		return 0;
 
 	ret = find_extent_clone(sctx, path, key->objectid, key->offset,
 				sctx->cur_inode_info->size, &found_clone);
@@ -6146,9 +6188,8 @@ static int process_extent(struct send_ctx *sctx,
 	}
 	if (ret)
 		return ret;
-	sctx->cur_inode_next_write_offset = end;
-out_hole:
-	return maybe_send_hole(sctx, path, key);
+	sctx->cur_inode_offset = end;
+	return 0;
 }
 
 static int process_all_extents(struct send_ctx *sctx)
@@ -6175,7 +6216,7 @@ static int process_all_extents(struct send_ctx *sctx)
 			break;
 		}
 
-		ret = process_extent(sctx, path, &found_key);
+		ret = process_extent(sctx, path, &found_key, false);
 		if (ret < 0)
 			break;
 	}
@@ -6215,7 +6256,6 @@ static int finish_inode_if_needed(struct send_ctx *sctx, int at_end)
 	int ret = 0;
 	bool need_chown;
 	bool need_chmod;
-	bool need_truncate;
 	int pending_move = 0;
 	int refs_processed = 0;
 
@@ -6250,37 +6290,20 @@ static int finish_inode_if_needed(struct send_ctx *sctx, int at_end)
 	if (sctx->cur_inode_new) {
 		need_chown = true;
 		need_chmod = !S_ISLNK(sctx->cur_inode_info->mode);
-		need_truncate = (sctx->cur_inode_next_write_offset !=
-				 sctx->cur_inode_info->size);
 	} else {
 		need_chown = (sctx->left_inode.uid != sctx->right_inode.uid ||
 			      sctx->left_inode.gid != sctx->right_inode.gid);
 		need_chmod = (!S_ISLNK(sctx->cur_inode_info->mode) &&
 			      sctx->left_inode.mode != sctx->right_inode.mode);
-		need_truncate = (sctx->left_inode.size >
-				 sctx->right_inode.size &&
-				 sctx->cur_inode_next_write_offset !=
-				 sctx->cur_inode_info->size);
 	}
 
 	if (S_ISREG(sctx->cur_inode_info->mode)) {
-		if (need_send_hole(sctx)) {
-			if (sctx->cur_inode_last_extent == (u64)-1 ||
-			    sctx->cur_inode_last_extent <
-			    sctx->cur_inode_info->size) {
-				ret = get_last_extent(sctx, (u64)-1);
-				if (ret)
-					goto out;
-			}
-			ret = send_hole(sctx, sctx->cur_inode_info->size);
-			if (ret)
-				goto out;
-		}
-		if (need_truncate) {
-			ret = send_truncate(sctx, sctx->cur_inode_info->size);
-			if (ret < 0)
-				goto out;
-		}
+		ret = get_last_extent(sctx, (u64)-1);
+		if (ret)
+			goto out;
+		ret = send_hole(sctx, sctx->cur_inode_info->size);
+		if (ret)
+			goto out;
 	}
 
 	if (need_chown) {
@@ -6450,8 +6473,7 @@ static int changed_inode(struct send_ctx *sctx,
 	close_current_inode(sctx);
 
 	sctx->cur_ino = key->objectid;
-	sctx->cur_inode_last_extent = (u64)-1;
-	sctx->cur_inode_next_write_offset = 0;
+	sctx->cur_inode_offset = 0;
 	sctx->ignore_cur_inode = false;
 
 	/*
@@ -6672,7 +6694,7 @@ static int changed_extent(struct send_ctx *sctx,
 	if (!sctx->cur_inode_new_gen && !sctx->cur_inode_deleted) {
 		if (result != BTRFS_COMPARE_TREE_DELETED)
 			ret = process_extent(sctx, sctx->left_path,
-					sctx->cmp_key);
+					     sctx->cmp_key, false);
 	}
 
 	return ret;
@@ -6800,8 +6822,9 @@ static int changed_cb(struct btrfs_path *left_path,
 				return 0;
 			if (ret < 0)
 				return ret;
-		} else if (key->type == BTRFS_EXTENT_DATA_KEY) {
-			return maybe_send_hole(sctx, left_path, key);
+		} else if (key->type == BTRFS_EXTENT_DATA_KEY &&
+			   key->objectid == sctx->cur_ino) {
+			return process_extent(sctx, left_path, key, true);
 		} else {
 			return 0;
 		}
