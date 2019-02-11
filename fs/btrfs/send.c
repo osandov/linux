@@ -5111,15 +5111,21 @@ out:
 	return ret;
 }
 
-static int range_is_hole_in_parent(struct send_ctx *sctx,
-				   const u64 start,
-				   const u64 end)
+/*
+ * [start, end) is a hole in the send root. Find the range which we need to hole
+ * punch in the parent root, which is the same range minus any contiguous holes
+ * at the beginning or end.
+ */
+static int non_hole_range_in_parent(struct send_ctx *sctx, u64 *start, u64 *end)
 {
 	struct btrfs_path *path;
 	struct btrfs_key key;
 	struct btrfs_root *root = sctx->parent_root;
-	u64 search_start = start;
+	u64 orig_start, orig_end, search_start;
 	int ret;
+
+	orig_end = *end;
+	*end = search_start = orig_start = *start;
 
 	path = alloc_path_for_send();
 	if (!path)
@@ -5134,7 +5140,7 @@ static int range_is_hole_in_parent(struct send_ctx *sctx,
 	if (ret > 0 && path->slots[0] > 0)
 		path->slots[0]--;
 
-	while (search_start < end) {
+	while (search_start < orig_end) {
 		struct extent_buffer *leaf = path->nodes[0];
 		int slot = path->slots[0];
 		struct btrfs_file_extent_item *fi;
@@ -5150,28 +5156,33 @@ static int range_is_hole_in_parent(struct send_ctx *sctx,
 		}
 
 		btrfs_item_key_to_cpu(leaf, &key, slot);
-		if (key.objectid < sctx->cur_ino ||
-		    key.type < BTRFS_EXTENT_DATA_KEY)
+		if (key.objectid < sctx->cur_ino)
 			goto next;
-		if (key.objectid > sctx->cur_ino ||
-		    key.type > BTRFS_EXTENT_DATA_KEY ||
-		    key.offset >= end)
+		if (key.objectid > sctx->cur_ino)
+			break;
+		if (key.type < BTRFS_EXTENT_DATA_KEY)
+			goto next;
+		if (key.type > BTRFS_EXTENT_DATA_KEY || key.offset >= orig_end)
 			break;
 
 		fi = btrfs_item_ptr(leaf, slot, struct btrfs_file_extent_item);
 		extent_end = btrfs_file_extent_end(path);
-		if (extent_end <= start)
+		if (extent_end <= orig_start)
 			goto next;
-		if (btrfs_file_extent_disk_bytenr(leaf, fi) == 0) {
-			search_start = extent_end;
-			goto next;
+		if (extent_end > orig_end)
+			extent_end = orig_end;
+		if (btrfs_file_extent_type(leaf, fi) == BTRFS_FILE_EXTENT_REG &&
+		    btrfs_file_extent_disk_bytenr(leaf, fi) == 0) {
+			if (*start == search_start)
+				*start = *end = extent_end;
+		} else {
+			*end = extent_end;
 		}
-		ret = 0;
-		goto out;
+		search_start = extent_end;
 next:
 		path->slots[0]++;
 	}
-	ret = 1;
+	ret = 0;
 out:
 	btrfs_free_path(path);
 	return ret;
@@ -5187,26 +5198,17 @@ static int send_hole(struct send_ctx *sctx, u64 end)
 	if (end <= offset)
 		return 0;
 
-	ret = range_is_hole_in_parent(sctx, offset, end);
-	if (ret < 0)
-		return ret;
+	ret = non_hole_range_in_parent(sctx, &offset, &end);
 	if (ret)
-		return 0;
-
-	/*
-	 * A hole that starts at EOF or beyond it. Since we do not yet support
-	 * fallocate (for extent preallocation and hole punching), sending a
-	 * write of zeroes starting at EOF or beyond would later require issuing
-	 * a truncate operation which would undo the write and achieve nothing.
-	 */
-	if (offset >= sctx->cur_inode_info->size)
-		return 0;
+		return ret;
 
 	/*
 	 * Don't go beyond the inode's i_size due to prealloc extents that start
 	 * after the i_size.
 	 */
 	end = min_t(u64, end, sctx->cur_inode_info->size);
+	if (end <= offset)
+		return 0;
 
 	if (sctx->flags & BTRFS_SEND_FLAG_NO_FILE_DATA)
 		return send_update_extent(sctx, offset, end - offset);
