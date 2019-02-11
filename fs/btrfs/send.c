@@ -6301,7 +6301,7 @@ static int finish_inode_if_needed(struct send_ctx *sctx, int at_end)
 		ret = get_last_extent(sctx, (u64)-1);
 		if (ret)
 			goto out;
-		ret = send_hole(sctx, sctx->cur_inode_info->size);
+		ret = send_hole(sctx, (u64)-1);
 		if (ret)
 			goto out;
 	}
