@@ -77,6 +77,12 @@ enum btrfs_send_cmd {
 
 	BTRFS_SEND_C_END,
 	BTRFS_SEND_C_UPDATE_EXTENT,
+
+	/* The following commands were added in stream version 2. */
+	BTRFS_SEND_C_FALLOCATE,
+	BTRFS_SEND_C_SETFLAGS,
+	BTRFS_SEND_C_WRITE_COMPRESSED,
+
 	__BTRFS_SEND_C_MAX,
 };
 #define BTRFS_SEND_C_MAX (__BTRFS_SEND_C_MAX - 1)
@@ -114,6 +120,10 @@ enum {
 	BTRFS_SEND_A_CLONE_PATH,
 	BTRFS_SEND_A_CLONE_OFFSET,
 	BTRFS_SEND_A_CLONE_LEN,
+
+	/* The following attributes were added in stream version 2. */
+	BTRFS_SEND_A_FALLOCATE_MODE,
+	BTRFS_SEND_A_SETFLAGS_FLAGS,
 
 	__BTRFS_SEND_A_MAX,
 };
