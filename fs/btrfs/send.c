@@ -4,6 +4,7 @@
  */
 
 #include <linux/bsearch.h>
+#include <linux/falloc.h>
 #include <linux/fs.h>
 #include <linux/file.h>
 #include <linux/sort.h>
@@ -584,6 +585,7 @@ static int tlv_put(struct send_ctx *sctx, u16 attr, const void *data, int len)
 		return tlv_put(sctx, attr, &__tmp, sizeof(__tmp));	\
 	}
 
+TLV_PUT_DEFINE_INT(32)
 TLV_PUT_DEFINE_INT(64)
 
 static int tlv_put_string(struct send_ctx *sctx, u16 attr,
@@ -4987,6 +4989,38 @@ out:
 	return ret;
 }
 
+static int send_fallocate(struct send_ctx *sctx, u32 mode, u64 offset, u32 len)
+{
+	struct fs_path *p;
+	int ret;
+
+	ASSERT(sctx->flags & BTRFS_SEND_FLAG_STREAM_V2);
+
+	p = fs_path_alloc();
+	if (!p)
+		return -ENOMEM;
+
+	ret = begin_cmd(sctx, BTRFS_SEND_C_FALLOCATE);
+	if (ret < 0)
+		goto out;
+
+	ret = get_cur_path(sctx, sctx->cur_ino, sctx->cur_inode->gen, p);
+	if (ret < 0)
+		goto out;
+
+	TLV_PUT_PATH(sctx, BTRFS_SEND_A_PATH, p);
+	TLV_PUT_U32(sctx, BTRFS_SEND_A_FALLOCATE_MODE, mode);
+	TLV_PUT_U64(sctx, BTRFS_SEND_A_FILE_OFFSET, offset);
+	TLV_PUT_U64(sctx, BTRFS_SEND_A_SIZE, len);
+
+	ret = send_cmd(sctx);
+
+tlv_put_failure:
+out:
+	fs_path_free(p);
+	return ret;
+}
+
 /*
  * [start, end) is a hole in the send root. Find the range which we need to hole
  * punch in the parent root, which is the same range minus any contiguous holes
@@ -5115,6 +5149,16 @@ static int send_hole(struct send_ctx *sctx, u64 end)
 	ret = non_hole_range_in_parent(sctx, &offset, &end);
 	if (ret)
 		goto out;
+
+	if (sctx->flags & BTRFS_SEND_FLAG_STREAM_V2) {
+		if (end > offset) {
+			ret = send_fallocate(sctx,
+					     FALLOC_FL_PUNCH_HOLE |
+					     FALLOC_FL_KEEP_SIZE,
+					     offset, end - offset);
+		}
+		goto out;
+	}
 
 	/*
 	 * Don't go beyond the inode's i_size due to prealloc extents that start
@@ -5688,6 +5732,7 @@ out:
 static int process_extent(struct send_ctx *sctx, struct btrfs_path *path,
 			  struct btrfs_key *key, bool same)
 {
+	bool v2 = sctx->flags & BTRFS_SEND_FLAG_STREAM_V2;
 	u64 bs = sctx->send_root->fs_info->sb->s_blocksize;
 	struct btrfs_file_extent_item *ei;
 	struct clone_root *found_clone = NULL;
@@ -5709,12 +5754,12 @@ static int process_extent(struct send_ctx *sctx, struct btrfs_path *path,
 	}
 
 	/*
-	 * Ignore holes. Since we don't have an fallocate command, treat
+	 * Ignore holes. If we can't use the fallocate command, treat
 	 * preallocated extents in new files as holes.
 	 */
 	if ((type == BTRFS_FILE_EXTENT_REG &&
 	    btrfs_file_extent_disk_bytenr(path->nodes[0], ei) == 0) ||
-	    (type == BTRFS_FILE_EXTENT_PREALLOC && sctx->cur_inode_new))
+	    (!v2 && type == BTRFS_FILE_EXTENT_PREALLOC && sctx->cur_inode_new))
 		return 0;
 
 	ret = send_hole(sctx, key->offset);
@@ -5744,6 +5789,39 @@ static int process_extent(struct send_ctx *sctx, struct btrfs_path *path,
 	if (same)
 		return skip_extent(sctx, offset + len);
 
+	/*
+	 * If we can't use the fallocate command, we write zeroes for
+	 * preallocated extents.
+	 */
+	if (v2 && type == BTRFS_FILE_EXTENT_PREALLOC) {
+		/*
+		 * If the file ends with a preallocated extent, we need to allow
+		 * fallocate to extend the file.
+		 */
+		if ((sctx->cur_inode_new ||
+		     sctx->left_inode.size > sctx->right_inode.size) &&
+		    offset < sctx->cur_inode->size &&
+		    offset + len >= sctx->cur_inode->size) {
+			u64 len_extend;
+
+			len_extend = sctx->cur_inode->size - offset;
+			ret = send_fallocate(sctx, FALLOC_FL_ZERO_RANGE, offset,
+					     len_extend);
+			if (ret)
+				return ret;
+			offset += len_extend;
+			len -= len_extend;
+			if (!len)
+				goto out;
+		}
+		ret = send_fallocate(sctx,
+				     FALLOC_FL_ZERO_RANGE | FALLOC_FL_KEEP_SIZE,
+				     offset, len);
+		if (ret)
+			return ret;
+		goto out;
+	}
+
 	if (offset >= sctx->cur_inode->size)
 		return 0;
 	if (offset + len > sctx->cur_inode->size)
@@ -5769,6 +5847,7 @@ static int process_extent(struct send_ctx *sctx, struct btrfs_path *path,
 	}
 	if (ret)
 		return ret;
+out:
 	sctx->cur_inode_offset = offset + len;
 	return 0;
 }
