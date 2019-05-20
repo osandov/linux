@@ -238,6 +238,25 @@ static u8 tpm_tis_status(struct tpm_chip *chip)
 	rc = tpm_tis_read8(priv, TPM_STS(priv->locality), &status);
 	if (rc < 0)
 		return 0;
+	/*
+	 * Some STMicroelectronics TPMs have a bug where the status register is
+	 * sometimes bogus (all 1s) if read immediately after the access
+	 * register is written to. Bits 0, 1, and 5 are always supposed to read
+	 * as 0, so this is clearly invalid. Reading the register a second time
+	 * returns a valid value.
+	 */
+	if (unlikely(status == 0xff)) {
+		rc = tpm_tis_read8(priv, TPM_STS(priv->locality), &status);
+		if (rc < 0)
+			return 0;
+		/*
+		 * The status is somehow still bad. This hasn't been observed in
+		 * practice, but clear it just in case so that it doesn't appear
+		 * to be ready.
+		 */
+		if (unlikely(status == 0xff))
+			status = 0;
+	}
 
 	return status;
 }
