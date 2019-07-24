@@ -2477,7 +2477,7 @@ static int send_chmod(struct send_ctx *sctx, u64 ino, u64 gen, u64 mode)
 	int ret = 0;
 	struct fs_path *p;
 
-	btrfs_debug(fs_info, "send_chmod %llu mode=%llu", ino, mode);
+	btrfs_debug(fs_info, "send_chmod %llu mode=0%llo", ino, mode);
 
 	p = fs_path_alloc();
 	if (!p)
