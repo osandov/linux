@@ -516,7 +516,7 @@ smb3_create_mf_symlink(unsigned int xid, struct cifs_tcon *tcon,
 
 int
 cifs_hardlink(struct dentry *old_file, struct inode *inode,
-	      struct dentry *direntry)
+	      struct dentry *direntry, int flags)
 {
 	int rc = -EACCES;
 	unsigned int xid;
@@ -527,6 +527,9 @@ cifs_hardlink(struct dentry *old_file, struct inode *inode,
 	struct cifs_tcon *tcon;
 	struct TCP_Server_Info *server;
 	struct cifsInodeInfo *cifsInode;
+
+	if (flags)
+		return -EINVAL;
 
 	tlink = cifs_sb_tlink(cifs_sb);
 	if (IS_ERR(tlink))

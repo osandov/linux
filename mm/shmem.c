@@ -2948,10 +2948,14 @@ static int shmem_create(struct inode *dir, struct dentry *dentry, umode_t mode,
 /*
  * Link a file..
  */
-static int shmem_link(struct dentry *old_dentry, struct inode *dir, struct dentry *dentry)
+static int shmem_link(struct dentry *old_dentry, struct inode *dir,
+		      struct dentry *dentry, int flags)
 {
 	struct inode *inode = d_inode(old_dentry);
 	int ret = 0;
+
+	if (flags)
+		return -EINVAL;
 
 	/*
 	 * No ordinary (disk based) filesystem counts links as inodes;

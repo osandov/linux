@@ -146,10 +146,13 @@ out_fail:
 }
 
 static int ufs_link (struct dentry * old_dentry, struct inode * dir,
-	struct dentry *dentry)
+		     struct dentry *dentry, int flags)
 {
 	struct inode *inode = d_inode(old_dentry);
 	int error;
+
+	if (flags)
+		return -EINVAL;
 
 	inode->i_ctime = current_time(inode);
 	inode_inc_link_count(inode);

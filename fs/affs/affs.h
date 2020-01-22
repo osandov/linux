@@ -171,7 +171,7 @@ extern int	affs_create(struct inode *dir, struct dentry *dentry, umode_t mode, b
 extern int	affs_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode);
 extern int	affs_rmdir(struct inode *dir, struct dentry *dentry);
 extern int	affs_link(struct dentry *olddentry, struct inode *dir,
-			  struct dentry *dentry);
+			  struct dentry *dentry, int flags);
 extern int	affs_symlink(struct inode *dir, struct dentry *dentry,
 			     const char *symname);
 extern int	affs_rename2(struct inode *old_dir, struct dentry *old_dentry,

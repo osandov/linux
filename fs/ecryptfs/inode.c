@@ -422,13 +422,16 @@ static struct dentry *ecryptfs_lookup(struct inode *ecryptfs_dir_inode,
 }
 
 static int ecryptfs_link(struct dentry *old_dentry, struct inode *dir,
-			 struct dentry *new_dentry)
+			 struct dentry *new_dentry, int flags)
 {
 	struct dentry *lower_old_dentry;
 	struct dentry *lower_new_dentry;
 	struct dentry *lower_dir_dentry;
 	u64 file_size_save;
 	int rc;
+
+	if (flags)
+		return -EINVAL;
 
 	file_size_save = i_size_read(d_inode(old_dentry));
 	lower_old_dentry = ecryptfs_dentry_to_lower(old_dentry);

@@ -312,11 +312,14 @@ out:
 }
 
 static int f2fs_link(struct dentry *old_dentry, struct inode *dir,
-		struct dentry *dentry)
+		     struct dentry *dentry, int flags)
 {
 	struct inode *inode = d_inode(old_dentry);
 	struct f2fs_sb_info *sbi = F2FS_I_SB(dir);
 	int err;
+
+	if (flags)
+		return -EINVAL;
 
 	if (unlikely(f2fs_cp_error(sbi)))
 		return -EIO;

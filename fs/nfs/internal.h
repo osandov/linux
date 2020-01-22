@@ -356,7 +356,7 @@ int nfs_mkdir(struct inode *, struct dentry *, umode_t);
 int nfs_rmdir(struct inode *, struct dentry *);
 int nfs_unlink(struct inode *, struct dentry *);
 int nfs_symlink(struct inode *, struct dentry *, const char *);
-int nfs_link(struct dentry *, struct inode *, struct dentry *);
+int nfs_link(struct dentry *, struct inode *, struct dentry *, int);
 int nfs_mknod(struct inode *, struct dentry *, umode_t, dev_t);
 int nfs_rename(struct inode *, struct dentry *,
 	       struct inode *, struct dentry *, unsigned int);

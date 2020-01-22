@@ -174,11 +174,14 @@ out_fail:
 }
 
 static int nilfs_link(struct dentry *old_dentry, struct inode *dir,
-		      struct dentry *dentry)
+		      struct dentry *dentry, int flags)
 {
 	struct inode *inode = d_inode(old_dentry);
 	struct nilfs_transaction_info ti;
 	int err;
+
+	if (flags)
+		return -EINVAL;
 
 	err = nilfs_transaction_begin(dir->i_sb, &ti, 1);
 	if (err)

@@ -4181,7 +4181,7 @@ int vfs_link(struct dentry *old_dentry, struct inode *dir, struct dentry *new_de
 	else {
 		error = try_break_deleg(inode, delegated_inode);
 		if (!error)
-			error = dir->i_op->link(old_dentry, dir, new_dentry);
+			error = dir->i_op->link(old_dentry, dir, new_dentry, 0);
 	}
 
 	if (!error && (inode->i_state & I_LINKABLE)) {

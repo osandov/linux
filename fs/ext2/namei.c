@@ -196,10 +196,13 @@ out_fail:
 }
 
 static int ext2_link (struct dentry * old_dentry, struct inode * dir,
-	struct dentry *dentry)
+		      struct dentry *dentry, int flags)
 {
 	struct inode *inode = d_inode(old_dentry);
 	int err;
+
+	if (flags)
+		return -EINVAL;
 
 	err = dquot_initialize(dir);
 	if (err)

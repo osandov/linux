@@ -781,8 +781,8 @@ void jfs_free_zero_link(struct inode *ip)
  * EXDEV: target object and new link are on different file systems and
  * implementation does not support links between file systems [XPG4.2].
  */
-static int jfs_link(struct dentry *old_dentry,
-	     struct inode *dir, struct dentry *dentry)
+static int jfs_link(struct dentry *old_dentry, struct inode *dir,
+		    struct dentry *dentry, int flags)
 {
 	int rc;
 	tid_t tid;
@@ -791,6 +791,9 @@ static int jfs_link(struct dentry *old_dentry,
 	struct component_name dname;
 	struct btstack btstack;
 	struct inode *iplist[2];
+
+	if (flags)
+		return -EINVAL;
 
 	jfs_info("jfs_link: %pd %pd", old_dentry, dentry);
 

@@ -1335,11 +1335,14 @@ v9fs_vfs_symlink(struct inode *dir, struct dentry *dentry, const char *symname)
 
 static int
 v9fs_vfs_link(struct dentry *old_dentry, struct inode *dir,
-	      struct dentry *dentry)
+	      struct dentry *dentry, int flags)
 {
 	int retval;
 	char name[1 + U32_MAX_DIGITS + 2]; /* sign + number + \n + \0 */
 	struct p9_fid *oldfid;
+
+	if (flags)
+		return -EINVAL;
 
 	p9_debug(P9_DEBUG_VFS, " %lu,%pd,%pd\n",
 		 dir->i_ino, dentry, old_dentry);

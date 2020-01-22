@@ -661,10 +661,13 @@ static int ovl_set_link_redirect(struct dentry *dentry)
 }
 
 static int ovl_link(struct dentry *old, struct inode *newdir,
-		    struct dentry *new)
+		    struct dentry *new, int flags)
 {
 	int err;
 	struct inode *inode;
+
+	if (flags)
+		return -EINVAL;
 
 	err = ovl_want_write(old);
 	if (err)

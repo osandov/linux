@@ -891,7 +891,7 @@ static struct dentry *gfs2_lookup(struct inode *dir, struct dentry *dentry,
  */
 
 static int gfs2_link(struct dentry *old_dentry, struct inode *dir,
-		     struct dentry *dentry)
+		     struct dentry *dentry, int flags)
 {
 	struct gfs2_inode *dip = GFS2_I(dir);
 	struct gfs2_sbd *sdp = GFS2_SB(dir);
@@ -901,6 +901,9 @@ static int gfs2_link(struct dentry *old_dentry, struct inode *dir,
 	struct buffer_head *dibh;
 	struct gfs2_diradd da = { .bh = NULL, .save_loc = 1, };
 	int error;
+
+	if (flags)
+		return -EINVAL;
 
 	if (S_ISDIR(inode->i_mode))
 		return -EPERM;

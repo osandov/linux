@@ -1195,7 +1195,7 @@ out_failed:
 }
 
 static int reiserfs_link(struct dentry *old_dentry, struct inode *dir,
-			 struct dentry *dentry)
+			 struct dentry *dentry, int flags)
 {
 	int retval;
 	struct inode *inode = d_inode(old_dentry);
@@ -1207,6 +1207,9 @@ static int reiserfs_link(struct dentry *old_dentry, struct inode *dir,
 	int jbegin_count =
 	    JOURNAL_PER_BALANCE_CNT * 3 +
 	    2 * REISERFS_QUOTA_TRANS_BLOCKS(dir->i_sb);
+
+	if (flags)
+		return -EINVAL;
 
 	retval = dquot_initialize(dir);
 	if (retval)

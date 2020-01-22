@@ -388,9 +388,13 @@ err:
 }
 
 int
-affs_link(struct dentry *old_dentry, struct inode *dir, struct dentry *dentry)
+affs_link(struct dentry *old_dentry, struct inode *dir, struct dentry *dentry,
+	  int flags)
 {
 	struct inode *inode = d_inode(old_dentry);
+
+	if (flags)
+		return -EINVAL;
 
 	pr_debug("%s(%lu, %lu, \"%pd\")\n", __func__, inode->i_ino, dir->i_ino,
 		 dentry);

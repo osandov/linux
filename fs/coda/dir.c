@@ -200,12 +200,15 @@ err_out:
 
 /* try to make de an entry in dir_inodde linked to source_de */ 
 static int coda_link(struct dentry *source_de, struct inode *dir_inode, 
-	  struct dentry *de)
+		     struct dentry *de, int flags)
 {
 	struct inode *inode = d_inode(source_de);
         const char * name = de->d_name.name;
 	int len = de->d_name.len;
 	int error;
+
+	if (flags)
+		return -EINVAL;
 
 	if (is_root_inode(dir_inode) && coda_iscontrol(name, len))
 		return -EPERM;

@@ -298,7 +298,7 @@ static int hfsplus_dir_release(struct inode *inode, struct file *file)
 }
 
 static int hfsplus_link(struct dentry *src_dentry, struct inode *dst_dir,
-			struct dentry *dst_dentry)
+			struct dentry *dst_dentry, int flags)
 {
 	struct hfsplus_sb_info *sbi = HFSPLUS_SB(dst_dir->i_sb);
 	struct inode *inode = d_inode(src_dentry);
@@ -307,6 +307,9 @@ static int hfsplus_link(struct dentry *src_dentry, struct inode *dst_dir,
 	char name[32];
 	u32 cnid, id;
 	int res;
+
+	if (flags)
+		return -EINVAL;
 
 	if (HFSPLUS_IS_RSRC(inode))
 		return -EPERM;

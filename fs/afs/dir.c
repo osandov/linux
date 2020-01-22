@@ -34,7 +34,7 @@ static int afs_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode);
 static int afs_rmdir(struct inode *dir, struct dentry *dentry);
 static int afs_unlink(struct inode *dir, struct dentry *dentry);
 static int afs_link(struct dentry *from, struct inode *dir,
-		    struct dentry *dentry);
+		    struct dentry *dentry, int flags);
 static int afs_symlink(struct inode *dir, struct dentry *dentry,
 		       const char *content);
 static int afs_rename(struct inode *old_dir, struct dentry *old_dentry,
@@ -1641,7 +1641,7 @@ error:
  * create a hard link between files in an AFS filesystem
  */
 static int afs_link(struct dentry *from, struct inode *dir,
-		    struct dentry *dentry)
+		    struct dentry *dentry, int flags)
 {
 	struct afs_fs_cursor fc;
 	struct afs_status_cb *scb;
@@ -1649,6 +1649,9 @@ static int afs_link(struct dentry *from, struct inode *dir,
 	struct afs_vnode *vnode = AFS_FS_I(d_inode(from));
 	struct key *key;
 	int ret;
+
+	if (flags)
+		return -EINVAL;
 
 	_enter("{%llx:%llu},{%llx:%llu},{%pd}",
 	       vnode->fid.vid, vnode->fid.vnode,

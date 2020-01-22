@@ -1869,7 +1869,7 @@ struct inode_operations {
 	int (*readlink) (struct dentry *, char __user *,int);
 
 	int (*create) (struct inode *,struct dentry *, umode_t, bool);
-	int (*link) (struct dentry *,struct inode *,struct dentry *);
+	int (*link) (struct dentry *,struct inode *,struct dentry *, int);
 	int (*unlink) (struct inode *,struct dentry *);
 	int (*symlink) (struct inode *,struct dentry *,const char *);
 	int (*mkdir) (struct inode *,struct dentry *,umode_t);
@@ -3298,7 +3298,7 @@ extern int simple_setattr(struct dentry *, struct iattr *);
 extern int simple_getattr(const struct path *, struct kstat *, u32, unsigned int);
 extern int simple_statfs(struct dentry *, struct kstatfs *);
 extern int simple_open(struct inode *inode, struct file *file);
-extern int simple_link(struct dentry *, struct inode *, struct dentry *);
+extern int simple_link(struct dentry *, struct inode *, struct dentry *, int);
 extern int simple_unlink(struct inode *, struct dentry *);
 extern int simple_rmdir(struct inode *, struct dentry *);
 extern int simple_rename(struct inode *, struct dentry *,

@@ -6759,7 +6759,7 @@ out_unlock:
 }
 
 static int btrfs_link(struct dentry *old_dentry, struct inode *dir,
-		      struct dentry *dentry)
+		      struct dentry *dentry, int flags)
 {
 	struct btrfs_trans_handle *trans = NULL;
 	struct btrfs_root *root = BTRFS_I(dir)->root;
@@ -6768,6 +6768,9 @@ static int btrfs_link(struct dentry *old_dentry, struct inode *dir,
 	u64 index;
 	int err;
 	int drop_inode = 0;
+
+	if (flags)
+		return -EINVAL;
 
 	/* do not allow sys_link's with other subvols of the same device */
 	if (root->root_key.objectid != BTRFS_I(inode)->root->root_key.objectid)

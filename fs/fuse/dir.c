@@ -842,13 +842,16 @@ static int fuse_rename2(struct inode *olddir, struct dentry *oldent,
 }
 
 static int fuse_link(struct dentry *entry, struct inode *newdir,
-		     struct dentry *newent)
+		     struct dentry *newent, int flags)
 {
 	int err;
 	struct fuse_link_in inarg;
 	struct inode *inode = d_inode(entry);
 	struct fuse_conn *fc = get_fuse_conn(inode);
 	FUSE_ARGS(args);
+
+	if (flags)
+		return -EINVAL;
 
 	memset(&inarg, 0, sizeof(inarg));
 	inarg.oldnodeid = get_node_id(inode);

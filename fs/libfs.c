@@ -318,9 +318,13 @@ int simple_open(struct inode *inode, struct file *file)
 }
 EXPORT_SYMBOL(simple_open);
 
-int simple_link(struct dentry *old_dentry, struct inode *dir, struct dentry *dentry)
+int simple_link(struct dentry *old_dentry, struct inode *dir,
+		struct dentry *dentry, int flags)
 {
 	struct inode *inode = d_inode(old_dentry);
+
+	if (flags)
+		return -EINVAL;
 
 	inode->i_ctime = dir->i_ctime = dir->i_mtime = current_time(inode);
 	inc_nlink(inode);

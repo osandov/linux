@@ -3366,12 +3366,15 @@ out_free_encrypted_link:
 	return err;
 }
 
-static int ext4_link(struct dentry *old_dentry,
-		     struct inode *dir, struct dentry *dentry)
+static int ext4_link(struct dentry *old_dentry, struct inode *dir,
+		     struct dentry *dentry, int flags)
 {
 	handle_t *handle;
 	struct inode *inode = d_inode(old_dentry);
 	int err, retries = 0;
+
+	if (flags)
+		return -EINVAL;
 
 	if (inode->i_nlink >= EXT4_LINK_MAX)
 		return -EMLINK;

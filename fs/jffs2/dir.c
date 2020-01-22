@@ -28,7 +28,7 @@ static int jffs2_create (struct inode *,struct dentry *,umode_t,
 			 bool);
 static struct dentry *jffs2_lookup (struct inode *,struct dentry *,
 				    unsigned int);
-static int jffs2_link (struct dentry *,struct inode *,struct dentry *);
+static int jffs2_link (struct dentry *,struct inode *,struct dentry *, int);
 static int jffs2_unlink (struct inode *,struct dentry *);
 static int jffs2_symlink (struct inode *,struct dentry *,const char *);
 static int jffs2_mkdir (struct inode *,struct dentry *,umode_t);
@@ -240,7 +240,8 @@ static int jffs2_unlink(struct inode *dir_i, struct dentry *dentry)
 /***********************************************************************/
 
 
-static int jffs2_link (struct dentry *old_dentry, struct inode *dir_i, struct dentry *dentry)
+static int jffs2_link (struct dentry *old_dentry, struct inode *dir_i,
+		       struct dentry *dentry, int flags)
 {
 	struct jffs2_sb_info *c = JFFS2_SB_INFO(old_dentry->d_sb);
 	struct jffs2_inode_info *f = JFFS2_INODE_INFO(d_inode(old_dentry));
@@ -248,6 +249,9 @@ static int jffs2_link (struct dentry *old_dentry, struct inode *dir_i, struct de
 	int ret;
 	uint8_t type;
 	uint32_t now;
+
+	if (flags)
+		return -EINVAL;
 
 	/* Don't let people make hard links to bad inodes. */
 	if (!f->inocache)

@@ -69,7 +69,7 @@ extern int cifs_atomic_open(struct inode *, struct dentry *,
 extern struct dentry *cifs_lookup(struct inode *, struct dentry *,
 				  unsigned int);
 extern int cifs_unlink(struct inode *dir, struct dentry *dentry);
-extern int cifs_hardlink(struct dentry *, struct inode *, struct dentry *);
+extern int cifs_hardlink(struct dentry *, struct inode *, struct dentry *, int);
 extern int cifs_mknod(struct inode *, struct dentry *, umode_t, dev_t);
 extern int cifs_mkdir(struct inode *, struct dentry *, umode_t);
 extern int cifs_rmdir(struct inode *, struct dentry *);

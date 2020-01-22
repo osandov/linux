@@ -39,7 +39,7 @@ static struct dentry *bad_inode_lookup(struct inode *dir,
 }
 
 static int bad_inode_link (struct dentry *old_dentry, struct inode *dir,
-		struct dentry *dentry)
+			   struct dentry *dentry, int flags)
 {
 	return -EIO;
 }

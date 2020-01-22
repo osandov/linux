@@ -672,7 +672,8 @@ static int ocfs2_create(struct inode *dir,
 
 static int ocfs2_link(struct dentry *old_dentry,
 		      struct inode *dir,
-		      struct dentry *dentry)
+		      struct dentry *dentry,
+		      int flags)
 {
 	handle_t *handle;
 	struct inode *inode = d_inode(old_dentry);
@@ -686,6 +687,9 @@ static int ocfs2_link(struct dentry *old_dentry,
 	struct ocfs2_dir_lookup_result lookup = { NULL, };
 	sigset_t oldset;
 	u64 old_de_ino;
+
+	if (flags)
+		return -EINVAL;
 
 	trace_ocfs2_link((unsigned long long)OCFS2_I(inode)->ip_blkno,
 			 old_dentry->d_name.len, old_dentry->d_name.name,

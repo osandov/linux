@@ -999,12 +999,15 @@ out:
 }
 
 static int ceph_link(struct dentry *old_dentry, struct inode *dir,
-		     struct dentry *dentry)
+		     struct dentry *dentry, int flags)
 {
 	struct ceph_fs_client *fsc = ceph_sb_to_client(dir->i_sb);
 	struct ceph_mds_client *mdsc = fsc->mdsc;
 	struct ceph_mds_request *req;
 	int err;
+
+	if (flags)
+		return -EINVAL;
 
 	if (ceph_snap(dir) != CEPH_NOSNAP)
 		return -EROFS;

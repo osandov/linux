@@ -144,12 +144,15 @@ static struct dentry *bfs_lookup(struct inode *dir, struct dentry *dentry,
 	return d_splice_alias(inode, dentry);
 }
 
-static int bfs_link(struct dentry *old, struct inode *dir,
-						struct dentry *new)
+static int bfs_link(struct dentry *old, struct inode *dir, struct dentry *new,
+		    int flags)
 {
 	struct inode *inode = d_inode(old);
 	struct bfs_sb_info *info = BFS_SB(inode->i_sb);
 	int err;
+
+	if (flags)
+		return -EINVAL;
 
 	mutex_lock(&info->bfs_lock);
 	err = bfs_add_entry(dir, &new->d_name, inode->i_ino);

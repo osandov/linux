@@ -622,10 +622,13 @@ static struct dentry *hostfs_lookup(struct inode *ino, struct dentry *dentry,
 }
 
 static int hostfs_link(struct dentry *to, struct inode *ino,
-		       struct dentry *from)
+		       struct dentry *from, int flags)
 {
 	char *from_name, *to_name;
 	int err;
+
+	if (flags)
+		return -EOPNOTSUPP;
 
 	if ((from_name = dentry_name(from)) == NULL)
 		return -ENOMEM;

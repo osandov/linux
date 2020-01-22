@@ -683,7 +683,7 @@ static void unlock_2_inodes(struct inode *inode1, struct inode *inode2)
 }
 
 static int ubifs_link(struct dentry *old_dentry, struct inode *dir,
-		      struct dentry *dentry)
+		      struct dentry *dentry, int flags)
 {
 	struct ubifs_info *c = dir->i_sb->s_fs_info;
 	struct inode *inode = d_inode(old_dentry);
@@ -693,6 +693,9 @@ static int ubifs_link(struct dentry *old_dentry, struct inode *dir,
 	struct ubifs_budget_req req = { .new_dent = 1, .dirtied_ino = 2,
 				.dirtied_ino_d = ALIGN(ui->data_len, 8) };
 	struct fscrypt_name nm;
+
+	if (flags)
+		return -EINVAL;
 
 	/*
 	 * Budget request settings: new direntry, changing the target inode,

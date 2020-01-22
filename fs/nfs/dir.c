@@ -1991,10 +1991,14 @@ int nfs_symlink(struct inode *dir, struct dentry *dentry, const char *symname)
 EXPORT_SYMBOL_GPL(nfs_symlink);
 
 int
-nfs_link(struct dentry *old_dentry, struct inode *dir, struct dentry *dentry)
+nfs_link(struct dentry *old_dentry, struct inode *dir, struct dentry *dentry,
+	 int flags)
 {
 	struct inode *inode = d_inode(old_dentry);
 	int error;
+
+	if (flags)
+		return -EINVAL;
 
 	dfprintk(VFS, "NFS: link(%pd2 -> %pd2)\n",
 		old_dentry, dentry);

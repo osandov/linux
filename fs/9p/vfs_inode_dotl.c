@@ -749,11 +749,14 @@ error:
 
 static int
 v9fs_vfs_link_dotl(struct dentry *old_dentry, struct inode *dir,
-		struct dentry *dentry)
+		   struct dentry *dentry, int flags)
 {
 	int err;
 	struct p9_fid *dfid, *oldfid;
 	struct v9fs_session_info *v9ses;
+
+	if (flags)
+		return -EINVAL;
 
 	p9_debug(P9_DEBUG_VFS, "dir ino: %lu, old_name: %pd, new_name: %pd\n",
 		 dir->i_ino, old_dentry, dentry);

@@ -1028,12 +1028,15 @@ out_no_entry:
 }
 
 static int udf_link(struct dentry *old_dentry, struct inode *dir,
-		    struct dentry *dentry)
+		    struct dentry *dentry, int flags)
 {
 	struct inode *inode = d_inode(old_dentry);
 	struct udf_fileident_bh fibh;
 	struct fileIdentDesc cfi, *fi;
 	int err;
+
+	if (flags)
+		return -EINVAL;
 
 	fi = udf_add_entry(dir, dentry, &fibh, &cfi, &err);
 	if (!fi) {
